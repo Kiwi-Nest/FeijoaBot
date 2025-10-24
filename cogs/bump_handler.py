@@ -101,7 +101,14 @@ class BumpHandlerCog(commands.Cog):
                 reward = PositiveInt(random.randint(50, 80))
                 user_id = UserId(bumper.id)
                 # Reward Currency
-                await self.bot.user_db.increment_stat(user_id, guild_id, StatName.CURRENCY, reward)
+                await self.bot.user_db.mint_currency(
+                    user_id,
+                    guild_id,
+                    amount=reward,
+                    event_reason="BUMP_SERVER",
+                    ledger_db=self.bot.ledger_db,
+                )
+
                 new_bump_count = await self.bot.user_db.increment_stat(user_id, guild_id, StatName.BUMPS, PositiveInt(1))
                 log.info("Rewarded %s with $%d for bumping.", bumper.display_name, reward)
                 # Ensure the channel is a TextChannel before sending

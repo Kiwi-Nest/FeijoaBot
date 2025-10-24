@@ -24,6 +24,7 @@ EventReason = Literal[
     "TRADE_PROFIT",
     "TRADE_LOSS",
     # --- ADD THESE NEW REASONS ---
+    "BUMP_SERVER",  # For cogs/bump_handler.py
     "HARVEST_SALE",  # For cogs/s_w_l.py
     "BLACKJACK_BET",  # For /blackjack and "Play Again"
     "BLACKJACK_DOUBLE_DOWN",  # For "Double Down" action

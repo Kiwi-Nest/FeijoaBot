@@ -43,7 +43,7 @@ def is_non_negative(num: int) -> TypeIs[NonNegativeInt]:
 # Define a more specific type for a message we know is from a guild
 if TYPE_CHECKING:
 
-    class GuildMessage(discord.Message):  # pyright: ignore [reportUnusedClass]
+    class GuildMessage(discord.Message):
         author: discord.Member = cast("discord.Member", None)
         guild: discord.Guild = cast("discord.Guild", None)
 

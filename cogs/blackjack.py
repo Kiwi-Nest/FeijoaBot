@@ -169,7 +169,7 @@ class BlackjackView(discord.ui.View):
     ) -> bool:
         """Check if the user can afford an action and deduct the amount."""
         user_id = UserId(interaction.user.id)
-        guild_id = GuildId(interaction.guild.id)  # pyright: ignore[reportArgumentType]
+        guild_id = GuildId(interaction.guild.id)
 
         # --- DETERMINE LEDGER REASON ---
         reason: EventReason
@@ -179,7 +179,7 @@ class BlackjackView(discord.ui.View):
             reason = "BLACKJACK_SPLIT"
         else:
             # Fallback, though this shouldn't be hit
-            reason = "BLACKJACK_BET"  # pyright: ignore[reportConstantRedefinition]
+            reason = "BLACKJACK_BET"
 
         new_balance = await self.bot.user_db.burn_currency(
             user_id=user_id,
@@ -217,7 +217,7 @@ class BlackjackView(discord.ui.View):
             return
 
         # --- 1. Update In-Memory Stats ---
-        guild_id = GuildId(self.user.guild.id)  # pyright: ignore[reportArgumentType]
+        guild_id = GuildId(self.user.guild.id)
         user_id = UserId(self.user.id)
 
         # These lines are no longer needed thanks to defaultdict:
@@ -238,7 +238,7 @@ class BlackjackView(discord.ui.View):
                 user_id=user_id,
                 guild_id=guild_id,
                 amount=PositiveInt(payout),
-                event_reason=payout_reason,  # pyright: ignore[reportArgumentType]
+                event_reason=payout_reason,
                 ledger_db=self.bot.ledger_db,
                 initiator_id=user_id,
             )
@@ -473,7 +473,7 @@ class PlayAgainButton(discord.ui.Button["BlackjackView"]):
     async def callback(self, interaction: Interaction) -> None:
         view = self.view
         user_id = UserId(interaction.user.id)
-        guild_id = GuildId(interaction.guild.id)  # pyright: ignore[reportArgumentType]
+        guild_id = GuildId(interaction.guild.id)
         new_balance = await view.bot.user_db.burn_currency(
             user_id=user_id,
             guild_id=guild_id,
@@ -560,7 +560,7 @@ class BlackjackCog(commands.Cog):
         bet: commands.Range[int, 1],  # ty: ignore [invalid-type-form]
     ) -> None:  # ty: ignore [invalid-type-form]
         user_id = UserId(ctx.author.id)
-        guild_id = GuildId(ctx.guild.id)  # pyright: ignore[reportArgumentType]
+        guild_id = GuildId(ctx.guild.id)
         new_balance = await self.bot.user_db.burn_currency(
             user_id=user_id,
             guild_id=guild_id,
