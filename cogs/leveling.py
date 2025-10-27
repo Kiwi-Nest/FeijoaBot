@@ -12,6 +12,7 @@ from modules.dtypes import GuildId, NonNegativeInt, PositiveInt, UserGuildPair, 
 from modules.enums import StatName
 
 # Import the refactored logic and helpers
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.leveling_utils import LevelBotProtocol, get_level, to_next_level
 from modules.security_utils import SecurityCheckError, validate_bot_hierarchy, validate_role_safety
 
@@ -29,7 +30,7 @@ LONG_ABSENCE_BONUS_HOURS: Final[int] = 6
 lowercase_letters = set(string.ascii_lowercase)
 
 
-class LevelingCog(commands.Cog):
+class LevelingCog(GuildOnlyHybridCog):
     """Handle the leveling system, including XP gain, ranks, and leaderboards."""
 
     # Define the parent group for all leveling commands

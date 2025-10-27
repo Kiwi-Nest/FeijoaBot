@@ -7,6 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, InviterId, UserId
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
@@ -14,7 +15,7 @@ log = logging.getLogger(__name__)
 SECOND_COOLDOWN: Final[int] = 1
 
 
-class InvitesCog(commands.Cog):
+class InvitesCog(GuildOnlyHybridCog):
     """A cog for tracking and displaying invite information."""
 
     # 1. Define the parent group for all invite commands
@@ -62,15 +63,10 @@ class InvitesCog(commands.Cog):
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member) -> None:
         """Handle new members joining the server and finds the inviter by diffing invite uses."""
-        # This logic now runs for all guilds, not just the privileged one.
         if member.bot:
             return
 
-        config = await self.bot.config_db.get_guild_config(GuildId(member.guild.id))
-        alert_channel_id = config.join_leave_log_channel_id
-
         inviter = None
-        found_invite = None
         try:
             guild_invites = self.invites.get(member.guild.id, {})
             current_invites = await member.guild.invites()
@@ -78,8 +74,7 @@ class InvitesCog(commands.Cog):
             for invite in current_invites:
                 if invite.uses is not None and (
                     invite.code not in guild_invites or invite.uses > guild_invites.get(invite.code, 0)
-                ):  # If invite code is new or uses increased, it's the one.
-                    found_invite = invite
+                ):
                     inviter = invite.inviter
                     break  # Found the invite, stop searching.
 
@@ -114,48 +109,13 @@ class InvitesCog(commands.Cog):
         # Determine the inviter's ID, defaulting to None if not found.
         inviter_id: InviterId = UserId(inviter.id) if inviter else None
 
-        # The database insertion and invite tracking now works for all guilds.
-        is_new_invite = await self.bot.invites_db.insert_invite(UserId(member.id), inviter_id, GuildId(member.guild.id))
-
-        # --- Privileged Guild Logic: Send alert to the configured channel ---
-        # Now, this logic applies to any guild that has configured a join_leave_log_channel_id
-        if not alert_channel_id:
-            return  # No alert channel configured for this guild
-        alert_channel = self.bot.get_channel(alert_channel_id)
-        if not isinstance(alert_channel, discord.TextChannel):
-            log.warning("Could not find alert channel %s for invite tracking.", alert_channel_id)
-            return
-
-        if not inviter:
-            log.warning("Could not determine inviter for %s via invite usage.", member.name)
-            await alert_channel.send(f"⚠️ Could not automatically determine the inviter for {member.mention}.")
-            return
-
-        result_color = discord.Color.blue() if is_new_invite else discord.Color.orange()
-        result_title = "✅ New Invite Recorded" if is_new_invite else "Welcome Back!"
-        description = f"{member.mention} was invited by {inviter.mention}"
-
-        embed = discord.Embed(
-            title=result_title,
-            description=description,
-            color=result_color,
-            timestamp=member.joined_at,
+        # This cog's only job is to find the inviter and save it.
+        # The JoinLeaveLogCog will handle all logging.
+        await self.bot.invites_db.insert_invite(
+            UserId(member.id),
+            inviter_id,
+            GuildId(member.guild.id),
         )
-        embed.set_author(name=f"{member.name} ({member.id})", icon_url=member.display_avatar)
-
-        if found_invite:
-            inviter = found_invite.inviter
-            uses = found_invite.uses or "N/A"
-            embed.add_field(
-                name="Invited by",
-                value=(f"{inviter.mention} ({inviter.name})" if inviter else "Unknown Inviter"),
-            )
-            embed.set_footer(text=f"Invite code: {found_invite.code} ({uses} uses)")
-        else:
-            embed.add_field(name="Invite", value="Could not determine the invite used.")
-            embed.set_footer(text="Joined via vanity URL, expired invite, or other means.")
-
-        await alert_channel.send(embed=embed)
 
     @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite) -> None:

@@ -8,6 +8,7 @@ from discord import Object, app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, PositiveInt, UserId
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
@@ -19,9 +20,7 @@ GUILD: Final[Object] = Object(GUILD_ID)
 COOLDOWN: Final[int] = 3600 * 6  # 6 hours
 
 
-# Restricted to guild
-@app_commands.guilds(GUILD)
-class Harvest(commands.Cog):
+class Harvest(GuildOnlyHybridCog):
     LIMBS: Final[tuple[str, ...]] = (
         "Left Arm",
         "Right Arm",
@@ -137,4 +136,4 @@ async def setup(bot: KiwiBot) -> None:
             "Harvest cog not loaded. Missing 'SWL_GUILD_ID'.",
         )
         return
-    await bot.add_cog(Harvest(bot))
+    await bot.add_cog(Harvest(bot), guild=Object(bot.config.swl_guild_id))

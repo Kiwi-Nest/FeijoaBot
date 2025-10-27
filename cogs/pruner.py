@@ -6,7 +6,7 @@ from discord.ext import commands, tasks
 
 from modules.dtypes import GuildId
 from modules.KiwiBot import KiwiBot
-from modules.security_utils import is_bot_hierarchy_sufficient
+from modules.security_utils import is_bot_hierarchy_sufficient, is_role_safe
 from modules.UserDB import UserDB
 
 if TYPE_CHECKING:
@@ -34,8 +34,17 @@ class PrunerCog(commands.Cog):
         self.prune_loop.cancel()
 
     @tasks.loop(hours=1)
-    async def prune_loop(self) -> None:  # noqa: PLR0912
+    async def prune_loop(self) -> None:  # noqa: PLR0912, PLR0915
         """Check for and prune inactive members."""
+        # Add this check
+        leveling_cog = self.bot.get_cog("LevelingCog")
+        if not leveling_cog:
+            log.error(
+                "Prune loop cannot run because the LevelingCog is not loaded. "
+                "This is a safety measure to prevent accidental pruning of all members.",
+            )
+            return
+
         log.info(
             "Running automatic prune check for inactive members across all guilds...",
         )
@@ -106,15 +115,30 @@ class PrunerCog(commands.Cog):
 
                 safe_roles_to_remove = []
                 for role in roles_to_remove:
-                    is_high_enough, hier_err = is_bot_hierarchy_sufficient(guild, role)
-                    if is_high_enough:
+                    safe_result = is_role_safe(role, require_no_permissions=True)
+                    hierarchy_result = is_bot_hierarchy_sufficient(guild, role)
+
+                    if not safe_result.ok:
+                        await self.bot.log_admin_warning(
+                            guild_id=GuildId(guild.id),
+                            warning_type="prune_security",
+                            description=(
+                                f"I skipped pruning role {role.mention} from {member.mention}. Reason: {safe_result.reason}"
+                            ),
+                            level="WARNING",
+                        )
+                        continue  # Skip this unsafe role
+
+                    if hierarchy_result.ok:
                         safe_roles_to_remove.append(role)
                     else:
                         # Log a warning for the specific role that failed
                         await self.bot.log_admin_warning(
                             guild_id=GuildId(guild.id),
                             warning_type="prune_permission",
-                            description=(f"I failed to prune role {role.mention} from {member.mention}. Reason: {hier_err}"),
+                            description=(
+                                f"I failed to prune role {role.mention} from {member.mention}. Reason: {hierarchy_result.reason}"
+                            ),
                             level="ERROR",
                         )
 

@@ -42,11 +42,15 @@ extend-ignore = [
   "PLR2004", # Magic numbers
   "PLR0913", # Too many arguments
   "TRY301",  # Abstract `raise` to an inner function
+  "SLF001",  # Allow accessing private member (blackjack21 support)
 ]
 preview = true
 
 [tool.ty.rules]
 unresolved-import = "ignore"
+
+[tool.uv.sources]
+blackjack21 = { git = "https://github.com/Restitutor/blackjack21", branch = "v4.0.0" }
 
 [tool.ruff.format]
 quote-style = "double"

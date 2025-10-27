@@ -3,12 +3,13 @@ import logging
 import discord
 from discord.ext import commands
 
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
 
-class Roles(commands.Cog):
+class Roles(GuildOnlyHybridCog):
     """A cog for listing and managing roles."""
 
     def __init__(self, bot: KiwiBot) -> None:
@@ -18,7 +19,8 @@ class Roles(commands.Cog):
         name="listroles",
         description="Lists all roles, sorted by permissions.",
     )
-    @commands.guild_only()  # This command can only be used in a server
+    @commands.guild_only()
+    @discord.app_commands.checks.has_permissions(ban_members=True)
     async def list_roles(self, ctx: commands.Context) -> None:
         """List all roles with permissions and those with none."""
         if not ctx.guild:

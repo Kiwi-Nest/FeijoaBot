@@ -158,7 +158,7 @@ def get_suggestions(guild: discord.Guild) -> dict[str, int | None]:  # noqa: PLR
 
 
 @app_commands.default_permissions(manage_guild=True)
-@app_commands.guild_only()
+@commands.guild_only()
 class Config(
     commands.GroupCog,
     name="config",

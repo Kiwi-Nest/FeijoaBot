@@ -7,13 +7,14 @@ from discord.ext import commands
 
 from modules.dtypes import GuildId, UserId
 from modules.enums import StatName
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 SECOND_COOLDOWN: Final[int] = 1
 
 
-class Bal(commands.Cog):
+class Bal(GuildOnlyHybridCog):
     bot: KiwiBot
 
     def __init__(self, bot: KiwiBot) -> None:

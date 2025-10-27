@@ -9,7 +9,7 @@ constraints and generated columns to enforce data integrity.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, ClassVar, override
+from typing import TYPE_CHECKING, ClassVar
 
 from modules.CurrencyLedgerDB import SYSTEM_USER_ID
 from modules.dtypes import GuildId, NonNegativeInt, PositiveInt, ReminderPreference, UserGuildPair, UserId
@@ -28,7 +28,6 @@ class UserDB:
         self.database = database
         self.log = logging.getLogger(__name__)
 
-    @override
     async def post_init(self) -> None:
         """Initialize the database table for users."""
         async with self.database.get_conn() as conn:

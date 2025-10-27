@@ -17,6 +17,7 @@ import discord
 from discord.ext import commands, tasks
 
 from modules.dtypes import GuildId, PositiveInt, ReminderPreference, UserId
+from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
     # This avoids circular imports while providing type hints for the bot class
@@ -154,7 +155,7 @@ class DailyView(discord.ui.View):
         )
 
 
-class Daily(commands.Cog):
+class Daily(GuildOnlyHybridCog):
     def __init__(self, bot: "KiwiBot") -> None:
         self.bot = bot
         self.daily_management_task.start()
@@ -241,10 +242,6 @@ class Daily(commands.Cog):
 
     @commands.hybrid_command(name="daily", description="Claim your daily currency.")
     async def daily(self, ctx: commands.Context) -> None:
-        if not ctx.guild:
-            await ctx.send("This command can only be used in a server.", ephemeral=True)
-            return
-
         # Atomically attempt to claim the daily. If it fails, they've already claimed.
         if not await self.bot.user_db.attempt_daily_claim(UserId(ctx.author.id), GuildId(ctx.guild.id)):
             embed = discord.Embed(

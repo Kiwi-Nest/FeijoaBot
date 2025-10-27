@@ -1,7 +1,6 @@
-# cogs/reaction_roles.py
-
 import logging
 import re
+import time
 from collections import defaultdict
 from typing import TypedDict, cast, override
 
@@ -60,6 +59,9 @@ class ReactionRoles(commands.Cog):
         # --- Message Caching ---
         self.analysis_cache: dict[MessageId, list[AnalysisResult]] = {}
         self.MAX_CACHE_SIZE = 128
+        self.COOLDOWN_DURATION = 1.5  # seconds
+        self.user_reaction_cooldowns: dict[tuple[int, int, str], float] = {}
+        self.MAX_COOLDOWN_CACHE_SIZE = 1024
 
         self.debug_reaction_role_menu = app_commands.ContextMenu(
             name="Debug Reaction Role",
@@ -144,29 +146,29 @@ class ReactionRoles(commands.Cog):
                 continue
 
             # 4. Security Check: Use centralized boolean function
-            is_safe, error_msg = is_role_safe(role, require_no_permissions=True)
-            if not is_safe:
+            safe_result = is_role_safe(role, require_no_permissions=True)
+            if not safe_result.ok:
                 results.append(
                     {
                         "status": "ERROR",
                         "line_content": clean_line,
                         "emoji_str": emoji_str,
                         "role": role,
-                        "error_message": error_msg,  # Use the message from our util
+                        "error_message": safe_result.reason,  # Use the message from our util
                     },
                 )
                 continue
 
             # 5. Bot Hierarchy Check: Use centralized boolean function
-            is_sufficient, error_msg = is_bot_hierarchy_sufficient(message.guild, role)
-            if not is_sufficient:
+            hierarchy_result = is_bot_hierarchy_sufficient(message.guild, role)
+            if not hierarchy_result.ok:
                 results.append(
                     {
                         "status": "ERROR",
                         "line_content": clean_line,
                         "emoji_str": emoji_str,
                         "role": role,
-                        "error_message": error_msg,  # Use the message from our util
+                        "error_message": hierarchy_result.reason,  # Use the message from our util
                     },
                 )
                 continue
@@ -220,90 +222,232 @@ class ReactionRoles(commands.Cog):
         """Listen for a reaction being removed from any message."""
         await self._handle_reaction_event(payload)
 
+    def _is_user_on_cooldown(
+        self,
+        user_id: int,
+        message_id: int,
+        emoji_str: str,
+    ) -> bool:
+        """Check and update the per-user, per-reaction cooldown."""
+        key = (message_id, user_id, emoji_str)
+        current_time = time.time()
+
+        if last_event_time := self.user_reaction_cooldowns.get(key):
+            time_since = current_time - last_event_time
+            if time_since < self.COOLDOWN_DURATION:
+                log.debug(
+                    "User %d on cooldown for reaction %s on message %d.",
+                    user_id,
+                    emoji_str,
+                    message_id,
+                )
+                return True  # User is on cooldown
+
+        # Manage cache size
+        if len(self.user_reaction_cooldowns) >= self.MAX_COOLDOWN_CACHE_SIZE:
+            del self.user_reaction_cooldowns[next(iter(self.user_reaction_cooldowns))]
+
+        # Update timestamp
+        self.user_reaction_cooldowns[key] = current_time
+        return False  # User is not on cooldown
+
+    async def _fetch_reaction_context(
+        self,
+        payload: discord.RawReactionActionEvent,
+    ) -> tuple[discord.Guild, discord.Member, discord.Message] | None:
+        """Fetch Guild, Member, and Message objects required for reaction roles."""
+        # Guild is guaranteed to be present from the initial guard clause
+        if not payload.guild_id:
+            return None
+
+        guild = self.bot.get_guild(payload.guild_id)
+        if not guild:
+            return None
+
+        try:
+            member = await guild.fetch_member(payload.user_id)
+        except discord.NotFound:
+            log.debug("Member %d not found in guild %d.", payload.user_id, guild.id)
+            return None
+
+        try:
+            channel = await self.bot.fetch_channel(payload.channel_id)
+            message = await cast("discord.TextChannel", channel).fetch_message(
+                payload.message_id,
+            )
+        except (discord.NotFound, discord.Forbidden):
+            log.debug(
+                "Could not fetch message %d from channel %d.",
+                payload.message_id,
+                payload.channel_id,
+            )
+            return None
+
+        return guild, member, message
+
+    async def _validate_role_for_assignment(
+        self,
+        guild: discord.Guild,
+        member: discord.Member,
+        role: discord.Role,
+    ) -> bool:
+        """Perform security checks before assigning a role."""
+        # 1. Stale Cache Security Check (Permissions)
+        safe_result = is_role_safe(role, require_no_permissions=True)
+        if not safe_result.ok:
+            log.warning(
+                "Role '%s' failed stale cache security check (permissions no longer safe). User: '%s', Guild: '%s'",
+                role.name,
+                member.display_name,
+                guild.name,
+            )
+            return False
+
+        # 2. Stale Cache Security Check (Hierarchy)
+        hierarchy_result = is_bot_hierarchy_sufficient(guild, role)
+        if not hierarchy_result.ok:
+            log.warning(
+                "Role '%s' failed stale cache security check (hierarchy no longer sufficient). User: '%s', Guild: '%s'",
+                role.name,
+                member.display_name,
+                guild.name,
+            )
+            await self.bot.log_admin_warning(
+                guild_id=GuildId(guild.id),
+                warning_type="reaction_role_hierarchy",
+                description=(
+                    f"I could not assign/remove the reaction role {role.mention} "
+                    f"for {member.mention} because my bot role is no longer higher than it. "
+                    "Please move my role up in the server settings."
+                ),
+                level="ERROR",
+            )
+            return False
+
+        return True
+
+    async def _apply_reaction_role_change(
+        self,
+        member: discord.Member,
+        role: discord.Role,
+        event_type: str,
+        message_id: int,
+    ) -> None:
+        """Add or remove the target role from the member."""
+        try:
+            reason = f"Reaction Role {message_id}"
+            if event_type == "REACTION_ADD":
+                await member.add_roles(role, reason=reason)
+                log.info(
+                    "Added role '%s' to '%s' in guild '%s'",
+                    role.name,
+                    member.display_name,
+                    member.guild.name,
+                )
+            elif event_type == "REACTION_REMOVE":
+                await member.remove_roles(role, reason=reason)
+                log.info(
+                    "Removed role '%s' from '%s' in guild '%s'",
+                    role.name,
+                    member.display_name,
+                    member.guild.name,
+                )
+        except discord.Forbidden:
+            log.warning(
+                "Failed to modify role '%s' for '%s'. Check permissions and role hierarchy.",
+                role.name,
+                member.display_name,
+            )
+            await self.bot.log_admin_warning(
+                guild_id=GuildId(member.guild.id),
+                warning_type="reaction_role_permission",
+                description=(
+                    f"I failed to assign/remove the reaction role {role.mention} "
+                    f"for {member.mention}.\n\n"
+                    "**Reason**: `discord.Forbidden`. This is a role hierarchy "
+                    f"problem. Please ensure my bot role is higher than the `{role.name}` role."
+                ),
+                level="ERROR",
+            )
+        except discord.HTTPException:
+            log.exception(
+                "Network error while modifying role for '%s'",
+                member.display_name,
+            )
+
+    async def _process_reaction_analysis(
+        self,
+        analysis_results: list[AnalysisResult],
+        guild: discord.Guild,
+        member: discord.Member,
+        emoji_str: str,
+        event_type: str,
+        message_id: int,
+    ) -> None:
+        """Iterate analysis results and apply the correct role change."""
+        for result in analysis_results:
+            if result["status"] == "OK" and result["emoji_str"] == emoji_str:
+                target_role = cast("discord.Role", result["role"])
+
+                # Run security validation
+                if not await self._validate_role_for_assignment(
+                    guild,
+                    member,
+                    target_role,
+                ):
+                    continue  # Role is not safe, skip
+
+                # All checks passed, apply the role change
+                await self._apply_reaction_role_change(
+                    member,
+                    target_role,
+                    event_type,
+                    message_id,
+                )
+                # Found our match, no need to check other lines.
+                break
+
     async def _handle_reaction_event(
         self,
         payload: discord.RawReactionActionEvent,
     ) -> None:
         """Shared logic for processing both reaction add and remove events."""
-        if not payload.guild_id or payload.user_id == self.bot.user.id:
+        # 1. Initial Guard Clauses
+        if not self.bot.user or not payload.guild_id or payload.user_id == self.bot.user.id:
             return
 
-        guild = self.bot.get_guild(payload.guild_id)
-        if not guild:
+        user_id = payload.user_id
+        message_id = payload.message_id
+        emoji_str = str(payload.emoji)
+
+        # 2. Cooldown Check
+        if self._is_user_on_cooldown(user_id, message_id, emoji_str):
             return
 
-        try:
-            # fetch_member is required as the member might not be in cache.
-            member = await guild.fetch_member(payload.user_id)
-        except discord.NotFound:
+        # 3. Fetch Discord Objects
+        context = await self._fetch_reaction_context(payload)
+        if not context:
+            return
+        guild, member, message = context
+
+        # 4. Quick check: Is the emoji even in the message?
+        if emoji_str not in message.content:
             return
 
-        try:
-            channel = await self.bot.fetch_channel(payload.channel_id)
-            # We can cast here as fetch_channel on a guild channel ID will return a GuildChannel
-            # which has the fetch_message method. fetch_message will fail if it's not messageable.
-            message = await cast("discord.TextChannel", channel).fetch_message(
-                payload.message_id,
-            )
-        except (discord.NotFound, discord.Forbidden):
-            return
-
-        payload_emoji_str = str(payload.emoji)
-
-        if payload_emoji_str not in message.content:
-            return
-
+        # 5. Get (or compute) message analysis
         analysis_results = await self._analyze_reaction_message(message)
         if not analysis_results:
             return
 
-        for result in analysis_results:
-            if result["status"] == "OK" and result["emoji_str"] == payload_emoji_str:
-                target_role = cast("discord.Role", result["role"])
-
-                try:
-                    reason = f"Reaction Role {payload.message_id}"
-                    if payload.event_type == "REACTION_ADD":
-                        await member.add_roles(target_role, reason=reason)
-                        log.info(
-                            "Added role '%s' to '%s' in guild '%s'",
-                            target_role.name,
-                            member.display_name,
-                            guild.name,
-                        )
-                    elif payload.event_type == "REACTION_REMOVE":
-                        await member.remove_roles(target_role, reason=reason)
-                        log.info(
-                            "Removed role '%s' from '%s' in guild '%s'",
-                            target_role.name,
-                            member.display_name,
-                            guild.name,
-                        )
-                except discord.Forbidden:
-                    log.warning(
-                        "Failed to modify role '%s' for '%s'. Check permissions and role hierarchy.",
-                        target_role.name,
-                        member.display_name,
-                    )
-                    await self.bot.log_admin_warning(
-                        guild_id=GuildId(guild.id),
-                        warning_type="reaction_role_permission",
-                        description=(
-                            f"I failed to assign/remove the reaction role {target_role.mention} "
-                            f"for {member.mention}.\n\n"
-                            "**Reason**: `discord.Forbidden`. This is a role hierarchy "
-                            f"problem. Please ensure my bot role is higher than the `{target_role.name}` role."
-                        ),
-                        level="ERROR",
-                    )
-                except discord.HTTPException:
-                    log.exception(
-                        "Network error while modifying role for '%s'",
-                        member.display_name,
-                    )
-
-                # Found our match, no need to check other lines.
-                break
+        # 6. Process the results and apply role changes
+        await self._process_reaction_analysis(
+            analysis_results,
+            guild,
+            member,
+            emoji_str,
+            payload.event_type,
+            payload.message_id,
+        )
 
     @staticmethod
     def _format_analysis_report(

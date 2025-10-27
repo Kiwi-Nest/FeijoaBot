@@ -112,7 +112,11 @@ class AioTwelveDataClient:
         req_params["source"] = "aiohttp-custom"  # Identify our client
 
         try:
-            log.debug("Requesting %s %s with params: %s", method, url, req_params)
+            log_params = req_params.copy()
+            if "apikey" in log_params:
+                log_params["apikey"] = "[REDACTED]"
+            log.debug("Requesting %s %s with params: %s", method, url, log_params)
+
             async with session.request(
                 method,
                 url,

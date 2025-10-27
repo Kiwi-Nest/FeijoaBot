@@ -6,12 +6,16 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, ClassVar, Final
 
 import discord
-from blackjack21 import Card, Dealer, Player, PlayerBase, Table
+from blackjack21 import Card, Dealer, Deck, GameState, Player, Table
+from blackjack21 import GameResult as LibGameResult  # Rename to avoid conflict
+from blackjack21.deck import DEFAULT_RANKS  # We need this for the Deck
+from blackjack21.exceptions import InvalidActionError, PlayFailure
 from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, PositiveInt, UserId
 from modules.enums import StatName
+from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
     from discord import Interaction
@@ -21,15 +25,10 @@ if TYPE_CHECKING:
 
 SECOND_COOLDOWN: Final[int] = 1
 
-
-# --- Enums and Constants ---
-class ActiveHand(Enum):
-    """Cleanly manages which hand is active during a split."""
-
-    PRIMARY = auto()
-    SPLIT = auto()
+DEFAULT_SUITS: Final[tuple[str, ...]] = ("Hearts", "Diamonds", "Spades", "Clubs")
 
 
+# This enum is for mapping results to payouts
 class GameResult(Enum):
     """Represents the final outcome of a hand for stat tracking and payouts."""
 
@@ -39,11 +38,6 @@ class GameResult(Enum):
     BLACKJACK = auto()
     SURRENDER = auto()
 
-
-# Constants for magic values
-BLACKJACK_VALUE = 21
-BUST_RESULT = -2
-DEALER_WIN_RESULT = -1
 
 # --- Result Configuration ---
 RESULT_CONFIG = {
@@ -96,18 +90,27 @@ class BlackjackView(discord.ui.View):
         self.bot = bot
         self.user = user
         self.initial_bet = bet
-        self.active_hand_state: ActiveHand = ActiveHand.PRIMARY
         self.last_action: str | None = None
 
-        self.table = Table(players=[(user.display_name, bet)], auto_deal=True)
+        # Using 6 decks is common in casinos.
+        deck = Deck(suits=DEFAULT_SUITS, ranks=DEFAULT_RANKS, count=6)
+
+        self.table = Table(players=[(user.display_name, bet)], deck=deck)
         self.player: Player = self.table.players[0]
         self.dealer: Dealer = self.table.dealer
         self.outcome_message: str | None = None
 
-        # Handle instant blackjack on deal
-        if BLACKJACK_VALUE in (self.player.total, self.dealer.total):
-            # We cannot `await` in __init__, so we run _end_game synchronously.
-            # The async payout logic within _end_game will be spun off as a task.
+        try:
+            self.table.start_game()
+        except (InvalidActionError, RuntimeError) as e:
+            # This can happen if the deck is empty even after a reset
+            self.outcome_message = f"Error: Could not start game. {e}"
+            self.disable_all_buttons(True)
+            self.stop()
+            return
+
+        if self.table._state == GameState.ROUND_OVER:
+            # Run _end_game to parse results
             self._end_game()
         else:
             self._update_buttons()
@@ -126,34 +129,34 @@ class BlackjackView(discord.ui.View):
     @property
     def total_bet_at_risk(self) -> int:
         """Calculates the total bet across all hands."""
-        bet = self.player.bet  # Base bet, includes double down
-        if self.player.split:
-            bet += self.player.split.bet
-        return bet
-
-    @property
-    def active_hand(self) -> Player | PlayerBase:
-        """Returns the hand object that is currently being played."""
-        if self.active_hand_state is ActiveHand.SPLIT and self.player.split:
-            return self.player.split
-        return self.player
+        return sum(hand.bet for hand in self.player.hands)
 
     # --- Button and UI State Management ---
     def _update_buttons(self) -> None:
         """Clear and adds buttons based on the current game state."""
         self.clear_items()
-        if self.outcome_message:  # Game is over
+
+        if self.table._state == GameState.ROUND_OVER:  # Game is over
             self.add_item(PlayAgainButton(self.initial_bet))
             self.add_item(NewBetButton())
-        else:  # Player's turn
+        elif self.table._state == GameState.PLAYERS_TURN:  # Player's turn
             self.add_item(HitButton())
             self.add_item(StandButton())
-            if len(self.player.hand) == 2 and not self.player.split:
-                self.add_item(SurrenderButton())
-            if self.player.can_double_down:
-                self.add_item(DoubleDownButton())
-            if self.active_hand_state is ActiveHand.PRIMARY and self.player.can_split:
-                self.add_item(SplitButton())
+
+            current_hand = self.table.current_hand
+            if current_hand:
+                player = current_hand.player
+                # Can only double, split, or surrender on the first 2 cards
+                if len(current_hand.hand) == 2:
+                    self.add_item(DoubleDownButton())
+
+                    # Can only surrender if not split
+                    if len(player.hands) == 1:
+                        self.add_item(SurrenderButton())
+
+                    # Check if cards have the same value
+                    if current_hand.hand[0].value == current_hand.hand[1].value:
+                        self.add_item(SplitButton())
 
     def disable_all_buttons(self, is_disabled: bool = True) -> None:
         """Disables or enables all buttons in the view."""
@@ -220,10 +223,6 @@ class BlackjackView(discord.ui.View):
         guild_id = GuildId(self.user.guild.id)
         user_id = UserId(self.user.id)
 
-        # These lines are no longer needed thanks to defaultdict:
-        # if guild_id not in self.bot.blackjack_stats: ...
-        # if user_id not in self.bot.blackjack_stats[guild_id]: ...
-
         stats = self.bot.blackjack_stats[guild_id][user_id]  # This will now work automatically
 
         stats[config["stat"]] += 1
@@ -243,64 +242,84 @@ class BlackjackView(discord.ui.View):
                 initiator_id=user_id,
             )
 
+    def _map_result_to_outcome(  # noqa: PLR0911
+        self,
+        lib_result: LibGameResult,
+        bet: int,
+        hand_name: str,
+    ) -> tuple[GameResult, str]:
+        """Map the library's GameResult to the cog's GameResult and a message."""
+        if lib_result == LibGameResult.PLAYER_BUST:
+            return (GameResult.LOSS, f"{hand_name}: Busted! You lose ${bet:,}.")
+        if lib_result == LibGameResult.DEALER_WIN:
+            return (
+                GameResult.LOSS,
+                f"{hand_name}: Dealer wins. You lose ${bet:,}.",
+            )
+        if lib_result == LibGameResult.PUSH:
+            return (GameResult.PUSH, f"{hand_name}: It's a push! Bet returned.")
+        if lib_result == LibGameResult.BLACKJACK:
+            return (
+                GameResult.BLACKJACK,
+                f"{hand_name}: Blackjack! You win ${int(bet * 1.5):,}.",
+            )
+        if lib_result in (LibGameResult.PLAYER_WIN, LibGameResult.DEALER_BUST):
+            return (GameResult.WIN, f"{hand_name}: You win! You get ${bet:,}.")
+        if lib_result == LibGameResult.SURRENDER:
+            # Payout config handles returning 0.5x bet
+            return (
+                GameResult.SURRENDER,
+                f"{hand_name}: Surrendered. Half your bet (${bet // 2:,}) returned.",
+            )
+
+        # Fallback, should not be reached
+        return (GameResult.PUSH, f"{hand_name}: Push (unknown result).")
+
     def _end_game(self) -> None:
-        """Determine winner, sets outcome message, and calls for payout/stat updates."""
-        if not (self.dealer.stand or self.dealer.bust):
-            self.dealer.play_dealer()
+        """Parse results from the table, sets outcome message, and calls for payout/stat updates."""
+        # We just need to read the results from each hand.
 
-        def get_result(hand: Player | PlayerBase, bet: int) -> tuple[str, GameResult]:
-            result = hand.result
-            hand_name = "Split Hand" if hand is not self.player else "Main Hand"
+        messages = []
+        for i, hand in enumerate(self.player.hands):
+            bet = hand.bet
+            lib_result = hand.result
 
-            if result == BUST_RESULT:
-                return (f"{hand_name}: Busted! You lose ${bet:,}.", GameResult.LOSS)
-            if result == DEALER_WIN_RESULT:
-                return (
-                    f"{hand_name}: Dealer wins. You lose ${bet:,}.",
-                    GameResult.LOSS,
-                )
-            if result == 0:
-                return (f"{hand_name}: It's a push! Bet returned.", GameResult.PUSH)
-            if result == 1:
-                return (
-                    f"{hand_name}: Blackjack! You win ${int(bet * 1.5):,}.",
-                    GameResult.BLACKJACK,
-                )
-            if result in (2, 3):
-                return (f"{hand_name}: You win! You get ${bet:,}.", GameResult.WIN)
-            return ("", GameResult.PUSH)
+            hand_name = "Main Hand"
+            if len(self.player.hands) > 1:
+                hand_name = "Split Hand 1" if i == 0 else f"Split Hand {i + 1}"
 
-        main_text, main_result = get_result(self.player, self.player.bet)
-        asyncio.create_task(  # noqa: RUF006
-            self.resolve_payout_and_stats(main_result, self.player.bet),
-        )
-
-        if self.player.split:
-            split_text, split_result = get_result(
-                self.player.split,
-                self.player.split.bet,
+            payout_reason, message_fragment = self._map_result_to_outcome(
+                lib_result,
+                bet,
+                hand_name,
             )
+            messages.append(message_fragment)
+
             asyncio.create_task(  # noqa: RUF006
-                self.resolve_payout_and_stats(split_result, self.player.split.bet),
+                self.resolve_payout_and_stats(payout_reason, bet),
             )
-            self.outcome_message = f"{main_text}\n{split_text}"
-        else:
-            self.outcome_message = main_text
 
+        self.outcome_message = "\n".join(messages)
         self._update_buttons()
 
     async def _handle_stand_or_dd(self, interaction: Interaction) -> None:
+        """Show dealer's turn after player's turn is over."""
         self.disable_all_buttons()
+        # Edit message to show the final player state before dealer plays
         await interaction.response.edit_message(embed=self.create_embed(), view=self)
         await asyncio.sleep(1.5)
+
+        # inside the .stand() or .double_down() call
+        # We just need to call _end_game() to parse and display results.
         self._end_game()
         await interaction.edit_original_response(embed=self.create_embed(), view=self)
 
     # --- Embed Creation ---
     def create_embed(self) -> discord.Embed:
-        is_game_over = self.outcome_message is not None
+        is_game_over = self.table._state == GameState.ROUND_OVER
+
         color = discord.Colour.blue()  # Default for ongoing game
-        if is_game_over:
+        if is_game_over and self.outcome_message:
             # Determine color based on game outcome
             if "push" in self.outcome_message.lower():
                 color = discord.Colour.light_grey()
@@ -313,25 +332,38 @@ class BlackjackView(discord.ui.View):
             title=f"Blackjack | Total Bet: ${self.total_bet_at_risk:,}",
             color=color,
         )
-        dealer_hand_val = self.dealer.total if is_game_over else self.dealer.hand[0].value
-        dealer_hand_str = format_hand(self.dealer.hand, not is_game_over)
+
+        # We use table.dealer_visible_hand, which already handles hiding cards.
+        dealer_hand = self.table.dealer_visible_hand
+        dealer_hand_str = format_hand(dealer_hand)  # Use new, simpler format_hand
+
+        # Get the correct total to display
+        dealer_hand_val: int | str
+        if is_game_over:
+            dealer_hand_val = self.dealer.total  # Show final total
+        elif dealer_hand:
+            dealer_hand_val = dealer_hand[0].value  # Show up-card's value
+        else:
+            dealer_hand_val = "?"  # Fallback
+
         embed.add_field(
             name="Dealer's Hand",
             value=f"{dealer_hand_str}\n**Total: {dealer_hand_val}**",
             inline=False,
         )
 
-        p_active = "► " if self.active_hand_state is ActiveHand.PRIMARY and not is_game_over else ""
-        embed.add_field(
-            name=f"{p_active}{self.user.display_name}'s Hand",
-            value=f"{format_hand(self.player.hand)}\n**Total: {self.player.total}**",
-        )
+        for i, hand in enumerate(self.player.hands):
+            # Highlight the hand that is currently being played
+            is_active = (hand is self.table.current_hand) and not is_game_over
+            active_marker = "► " if is_active else ""
 
-        if self.player.split:
-            s_active = "► " if self.active_hand_state is ActiveHand.SPLIT and not is_game_over else ""
+            hand_name = f"{self.user.display_name}'s Hand"
+            if len(self.player.hands) > 1:
+                hand_name = "Split Hand 1" if i == 0 else f"Split Hand {i + 1}"
+
             embed.add_field(
-                name=f"{s_active}Split Hand",
-                value=f"{format_hand(self.player.split.hand)}\n**Total: {self.player.split.total}**",
+                name=f"{active_marker}{hand_name} (Bet: ${hand.bet:,})",
+                value=f"{format_hand(hand.hand)}\n**Total: {hand.total}**",  # format_hand no longer needs a bool
             )
 
         if self.outcome_message:
@@ -355,26 +387,23 @@ class HitButton(discord.ui.Button["BlackjackView"]):
 
     async def callback(self, interaction: Interaction) -> None:
         view = self.view
-        active_hand = view.active_hand
-        card = active_hand.play_hit()
-        view.last_action = f"You hit and drew a {card}."
 
-        if active_hand.bust:
-            view.last_action += " You busted!"
-            if view.player.split and view.active_hand_state is ActiveHand.PRIMARY:
-                view.active_hand_state = ActiveHand.SPLIT
-                view._update_buttons()  # noqa: SLF001
-                await interaction.response.edit_message(
-                    embed=view.create_embed(),
-                    view=view,
-                )
-            else:
-                view._end_game()  # noqa: SLF001
-                await interaction.response.edit_message(
-                    embed=view.create_embed(),
-                    view=view,
-                )
+        try:
+            card = view.table.hit()
+            view.last_action = f"You hit and drew a {card}."
+
+            if view.table.current_hand and view.table.current_hand.bust:
+                view.last_action += " You busted!"
+
+        except (PlayFailure, InvalidActionError) as e:
+            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+            return
+
+        if view.table._state == GameState.ROUND_OVER:  # Check for ROUND_OVER
+            await view._handle_stand_or_dd(interaction)
         else:
+            # Still player's turn
+            view._update_buttons()
             await interaction.response.edit_message(
                 embed=view.create_embed(),
                 view=view,
@@ -387,18 +416,24 @@ class StandButton(discord.ui.Button["BlackjackView"]):
 
     async def callback(self, interaction: Interaction) -> None:
         view = self.view
-        view.last_action = f"You stood with a total of {view.active_hand.total}."
-        view.active_hand.play_stand()
 
-        if view.player.split and view.active_hand_state is ActiveHand.PRIMARY:
-            view.active_hand_state = ActiveHand.SPLIT
-            view._update_buttons()  # noqa: SLF001
+        try:
+            view.last_action = f"You stood with a total of {view.table.current_hand.total}."
+            view.table.stand()
+        except (PlayFailure, InvalidActionError) as e:
+            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+            return
+
+        if view.table._state == GameState.ROUND_OVER:  # Check for ROUND_OVER
+            await view._handle_stand_or_dd(interaction)
+        else:
+            # Still player's turn (this 'else' is only hit if a player stands
+            # on one hand and still has another split hand to play)
+            view._update_buttons()
             await interaction.response.edit_message(
                 embed=view.create_embed(),
                 view=view,
             )
-        else:
-            await view._handle_stand_or_dd(interaction)  # noqa: SLF001
 
 
 class DoubleDownButton(discord.ui.Button["BlackjackView"]):
@@ -411,16 +446,32 @@ class DoubleDownButton(discord.ui.Button["BlackjackView"]):
 
     async def callback(self, interaction: Interaction) -> None:
         view = self.view
+        # Bet for DD is the bet on the *current hand*
+        bet_amount = view.table.current_hand.bet
+
         if not await view.check_and_charge(
             interaction,
-            view.initial_bet,
+            bet_amount,
             "double down",
         ):
             return
 
-        card = view.player.play_double_down()
-        view.last_action = f"You doubled down and drew a {card}. Final total: {view.player.total}."
-        await view._handle_stand_or_dd(interaction)  # noqa: SLF001
+        try:
+            card = view.table.double_down()
+            view.last_action = f"You doubled down and drew a {card}. Final total: {view.table.current_hand.total}."
+        except (PlayFailure, InvalidActionError) as e:
+            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+            return
+
+        if view.table._state == GameState.ROUND_OVER:  # Check for ROUND_OVER
+            await view._handle_stand_or_dd(interaction)
+        else:
+            # Still player's turn (e.g., doubled on first split hand)
+            view._update_buttons()
+            await interaction.response.edit_message(
+                embed=view.create_embed(),
+                view=view,
+            )
 
 
 class SplitButton(discord.ui.Button["BlackjackView"]):
@@ -429,21 +480,31 @@ class SplitButton(discord.ui.Button["BlackjackView"]):
 
     async def callback(self, interaction: Interaction) -> None:
         view = self.view
+        # Bet for split is the bet on the *current hand*
+        bet_amount = view.table.current_hand.bet
+
         if not await view.check_and_charge(
             interaction,
-            view.initial_bet,
+            bet_amount,
             "split",
         ):
             return
 
-        if view.player.can_split:
+        try:
+            view.table.split()
             view.last_action = "You split your hand!"
-            view.player.play_split()
-            view._update_buttons()  # noqa: SLF001
-            await interaction.response.edit_message(
-                embed=view.create_embed(),
-                view=view,
-            )
+
+            if view.table._state == GameState.ROUND_OVER:
+                # This happens if you split Aces
+                await view._handle_stand_or_dd(interaction)
+            else:
+                view._update_buttons()
+                await interaction.response.edit_message(
+                    embed=view.create_embed(),
+                    view=view,
+                )
+        except (PlayFailure, InvalidActionError) as e:
+            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
 
 class SurrenderButton(discord.ui.Button["BlackjackView"]):
@@ -452,17 +513,24 @@ class SurrenderButton(discord.ui.Button["BlackjackView"]):
 
     async def callback(self, interaction: Interaction) -> None:
         view = self.view
-        surrender_return = view.initial_bet // 2
-        view.outcome_message = f"You surrendered. Half your bet (${surrender_return:,}) was returned."
-        view.player._bust = True  # Internal way to mark a loss  # noqa: SLF001
-        view.disable_all_buttons(True)
 
-        await view.resolve_payout_and_stats(
-            GameResult.SURRENDER,
-            view.initial_bet,
-        )
-        view._update_buttons()  # noqa: SLF001
-        await interaction.response.edit_message(embed=view.create_embed(), view=view)
+        try:
+            view.table.surrender()
+            view.last_action = "You surrendered this hand."
+        except (PlayFailure, InvalidActionError) as e:
+            await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+            return
+
+        # or ends the turn. The result is calculated in _end_game
+        if view.table._state == GameState.ROUND_OVER:  # Check for ROUND_OVER
+            await view._handle_stand_or_dd(interaction)
+        else:
+            # Still player's turn (e.g., surrendered first split hand)
+            view._update_buttons()
+            await interaction.response.edit_message(
+                embed=view.create_embed(),
+                view=view,
+            )
 
 
 class PlayAgainButton(discord.ui.Button["BlackjackView"]):
@@ -495,12 +563,35 @@ class PlayAgainButton(discord.ui.Button["BlackjackView"]):
                 view=None,
             )
             return
-        new_view = BlackjackView(view.bot, interaction.user, self.bet)
+
+        view.outcome_message = None
+        view.last_action = "New round started."
+
+        try:
+            # start_game() on an existing table resets it for a new round
+            view.table.start_game()
+        except (InvalidActionError, RuntimeError) as e:
+            await interaction.response.edit_message(
+                content=f"Error starting new round: {e}",
+                embed=None,
+                view=None,
+            )
+            return
+
+        # Re-assign the player reference, as table.start_game()
+        # creates a new player object when it resets the round.
+        view.player = view.table.players[0]
+
+        # Check for instant blackjack again
+        if view.table._state == GameState.ROUND_OVER:
+            view._end_game()
+        else:
+            view._update_buttons()
+
         await interaction.response.edit_message(
-            embed=new_view.create_embed(),
-            view=new_view,
+            embed=view.create_embed(),
+            view=view,
         )
-        # --- END OF REPLACEMENT ---
 
 
 class NewBetButton(discord.ui.Button["BlackjackView"]):
@@ -517,19 +608,17 @@ class NewBetButton(discord.ui.Button["BlackjackView"]):
 
 
 # --- Helper & Cog ---
-def format_hand(hand: list[Card], is_dealer_hidden: bool = False) -> str:
+def format_hand(hand: list[Card]) -> str:
     """Format cards with suit emojis for a richer display."""
     suits = {"Hearts": "♥️", "Diamonds": "♦️", "Spades": "♠️", "Clubs": "♣️"}
 
     def format_card(card: Card) -> str:
         return f"`{card.rank}{suits.get(card.suit, card.suit)}`"
 
-    if is_dealer_hidden and len(hand) > 1:
-        return f"{format_card(hand[0])} `[?]`"
     return " ".join(format_card(c) for c in hand) if hand else "`Empty`"
 
 
-class BlackjackCog(commands.Cog):
+class BlackjackCog(GuildOnlyHybridCog):
     def __init__(self, bot: KiwiBot) -> None:
         self.bot = bot
 

@@ -184,6 +184,18 @@ class InvitesDB:
             # Ensure inviter_id is not None before casting to UserId
             return [(UserId(inviter_id), invite_count) for inviter_id, invite_count in rows if inviter_id is not None]
 
+    async def get_inviter_by_invitee(self, invitee_id: UserId, guild_id: GuildId) -> InviterId | None:
+        """Retrieve the inviter ID for a specific invitee in a guild."""
+        query = "SELECT inviter_id FROM invites WHERE invitee_id = ? AND guild_id = ?"
+        async with self.database.get_cursor() as cursor:
+            await cursor.execute(query, (invitee_id, guild_id))
+            row = await cursor.fetchone()
+            # Return the inviter_id if it exists and is not NULL
+            if row and row[0] is not None:
+                # The type checker knows row[0] is an int here
+                return UserId(row[0])
+            return None
+
     # --- Discord Raw API Operations ---
 
     async def get_member_details_api(self, username: str, guild_id: GuildId) -> dict[str, Any] | None:

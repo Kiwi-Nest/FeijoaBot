@@ -1,10 +1,11 @@
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
 import discord
 from discord.ext import commands
 
-from modules.dtypes import GuildId
+from modules.dtypes import GuildId, RoleId, UserId
 from modules.security_utils import is_bot_hierarchy_sufficient, is_role_safe
 from modules.utils import format_ordinal
 
@@ -63,78 +64,89 @@ class JoinLeaveLogCog(commands.Cog):
         except (discord.Forbidden, discord.HTTPException):
             log.exception("Failed to send message to join/leave log channel")
 
+    async def _autovalidate_member(self, verified_role_id: RoleId, member: discord.Member) -> discord.Role | None:  # noqa: PLR0912
+        """Automatically assign verified role id if user doesn't look bot like."""
+        verified_role: discord.Role | None = None
+
+        if not verified_role_id or member.bot:
+            return verified_role
+
+        # Log properties that indicate a real, established user account
+        # This helps identify potential self-bots (which would have none of these)
+        user_indicators: list[str] = []
+        if member.accent_colour:
+            user_indicators.append(f"accent_colour={member.accent_colour}")
+        if member.display_banner:
+            user_indicators.append("has_display_banner=True")
+        if member.avatar_decoration:
+            user_indicators.append("has_avatar_decoration=True")
+        if member.guild_avatar:
+            user_indicators.append("has_guild_avatar=True")
+        if member.premium_since:
+            user_indicators.append(f"boosting_since={member.premium_since}")
+
+        # PublicUserFlags
+        public_flags = [flag_name for flag_name, has_flag in member.public_flags if has_flag]
+        if public_flags:
+            user_indicators.append(f"public_flags={','.join(public_flags)}")
+
+        # MemberFlags
+        if member.flags.completed_onboarding:
+            user_indicators.append("completed_onboarding=True")
+        if member.flags.bypasses_verification:
+            user_indicators.append("bypasses_verification=True")
+
+        log.info(
+            "Member join: %s (%d). Indicators: %s",
+            str(member),
+            member.id,
+            "; ".join(user_indicators) if user_indicators else "None",
+        )
+
+        if user_indicators and verified_role_id:
+            role = member.guild.get_role(verified_role_id)
+            if role:
+                # Allow view message send message and other safe permissions
+                safe_result = is_role_safe(role, require_no_permissions=False)
+                hierarchy_result = is_bot_hierarchy_sufficient(member.guild, role)
+
+                if not safe_result.ok:
+                    await self.bot.log_admin_warning(
+                        guild_id=GuildId(member.guild.id),
+                        warning_type="dangerous_role_assignment",
+                        description=(
+                            f"**Blocked** auto-verification for {member.mention}. "
+                            f"The configured `verified_role_id` ({role.mention}) is not safe: {safe_result.reason}"
+                        ),
+                        level="ERROR",
+                    )
+                elif not hierarchy_result.ok:
+                    await self.bot.log_admin_warning(
+                        guild_id=GuildId(member.guild.id),
+                        warning_type="role_hierarchy",
+                        description=(
+                            f"**Failed** auto-verification for {member.mention}. "
+                            f"I cannot assign the `verified_role_id` ({role.mention}): {hierarchy_result.reason}"
+                        ),
+                        level="ERROR",
+                    )
+                else:
+                    # All checks passed, assign the role
+                    await member.add_roles(role, reason="Auto-verified on join")
+                    verified_role = role  # Save for logging
+
+        return verified_role
+
     @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member) -> None:  # noqa: PLR0912
+    async def on_member_join(self, member: discord.Member) -> None:
         """Handle logging when a new member joins or rejoins the server."""
         config = await self.bot.config_db.get_guild_config(GuildId(member.guild.id))
-
-        if not member.bot:
-            # Log properties that indicate a real, established user account
-            # This helps identify potential self-bots (which would have none of these)
-            user_indicators: list[str] = []
-            if member.accent_colour:
-                user_indicators.append(f"accent_colour={member.accent_colour}")
-            if member.display_banner:
-                user_indicators.append("has_display_banner=True")
-            if member.avatar_decoration:
-                user_indicators.append("has_avatar_decoration=True")
-            if member.guild_avatar:
-                user_indicators.append("has_guild_avatar=True")
-            if member.premium_since:
-                user_indicators.append(f"boosting_since={member.premium_since}")
-
-            # PublicUserFlags
-            public_flags = [flag_name for flag_name, has_flag in member.public_flags if has_flag]
-            if public_flags:
-                user_indicators.append(f"public_flags={','.join(public_flags)}")
-
-            # MemberFlags
-            if member.flags.completed_onboarding:
-                user_indicators.append("completed_onboarding=True")
-            if member.flags.bypasses_verification:
-                user_indicators.append("bypasses_verification=True")
-
-            log.info(
-                "Member join: %s (%d). Indicators: %s",
-                str(member),
-                member.id,
-                "; ".join(user_indicators) if user_indicators else "None",
-            )
-
-            if user_indicators and config.verified_role_id:
-                role = member.guild.get_role(config.verified_role_id)
-                if role:
-                    # Allow view message send message and other safe permissions
-                    is_safe, safe_err = is_role_safe(role, require_no_permissions=False)
-                    is_high_enough, hier_err = is_bot_hierarchy_sufficient(member.guild, role)
-
-                    if not is_safe:
-                        await self.bot.log_admin_warning(
-                            guild_id=GuildId(member.guild.id),
-                            warning_type="dangerous_role_assignment",
-                            description=(
-                                f"**Blocked** auto-verification for {member.mention}. "
-                                f"The configured `verified_role_id` ({role.mention}) is not safe: {safe_err}"
-                            ),
-                            level="ERROR",
-                        )
-                    elif not is_high_enough:
-                        await self.bot.log_admin_warning(
-                            guild_id=GuildId(member.guild.id),
-                            warning_type="role_hierarchy",
-                            description=(
-                                f"**Failed** auto-verification for {member.mention}. "
-                                f"I cannot assign the `verified_role_id` ({role.mention}): {hier_err}"
-                            ),
-                            level="ERROR",
-                        )
-                    else:
-                        # All checks passed, assign the role
-                        await member.add_roles(role, reason="Auto verified")
+        verified_role = await self._autovalidate_member(config.verified_role_id, member)
 
         if not config.join_leave_log_channel_id:
             return  # This guild hasn't configured this feature, so we do nothing.
 
+        # --- 2. Determine Title and Color ---
         # Use the did_rejoin flag to determine the event type
         if member.flags.did_rejoin:
             title = "Member Rejoined"
@@ -146,17 +158,39 @@ class JoinLeaveLogCog(commands.Cog):
         if member.bot:
             title += " [BOT]"
 
+        # --- 3. Get Inviter from DB (New) ---
+        inviter_mention: str | None = None
+        if not member.bot:
+            try:
+                # Wait a moment for the invites cog to write to the DB
+                # This is less complexity than a cross cog signaling system
+                # For a non critical invite message it's good enough
+                await asyncio.sleep(2)
+                # Use the new DB method
+                inviter_id = await self.bot.invites_db.get_inviter_by_invitee(
+                    UserId(member.id),
+                    GuildId(member.guild.id),
+                )
+                if inviter_id:
+                    inviter_mention = f"<@{inviter_id}>"
+            except Exception:
+                log.exception("Failed to get inviter from DB for join log")
+
+        # --- 4. Build Description ---
         # Count members who have at least one role (failed or passed captcha)
         member_count = len(
             [m for m in member.guild.members if not m.bot and m.flags.completed_onboarding and len(m.roles) > 1],
         )
 
-        # Prepare description lines for the embed
         description = [
             f"{member.mention} was the {format_ordinal(member_count)} member to join.",
             f"Account created: {discord.utils.format_dt(member.created_at, 'F')} \
 ({discord.utils.format_dt(member.created_at, 'R')})",
         ]
+        if inviter_mention:
+            description.append(f"**Invited by:** {inviter_mention}")
+        if verified_role:
+            description.append(f"**Auto-verified with:** {verified_role.mention}")
 
         await self._log_event(member, title, color, description)
 
@@ -186,6 +220,18 @@ class JoinLeaveLogCog(commands.Cog):
             )
 
         description.append(f"**Roles:** {roles_str}")
+
+        # --- Get Inviter from DB (New) ---
+        if not member.bot:
+            try:
+                inviter_id = await self.bot.invites_db.get_inviter_by_invitee(
+                    UserId(member.id),
+                    GuildId(member.guild.id),
+                )
+                if inviter_id:
+                    description.append(f"**Invited by:** <@{inviter_id}>")
+            except Exception:
+                log.exception("Failed to get inviter from DB for leave log")
 
         await self._log_event(member, title, color, description)
 

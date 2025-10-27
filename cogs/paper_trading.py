@@ -11,6 +11,7 @@ from discord.utils import format_dt  # For formatting timestamps
 
 # --- Local Imports ---
 from modules.dtypes import PositiveInt, UserId
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.trading_logic import (
     ALLOWED_STOCKS,
     InsufficientFundsError,
@@ -39,8 +40,7 @@ SECOND_COOLDOWN: Final[int] = 1
 
 
 # --- Discord Cog ---
-@app_commands.guild_only()
-class PaperTradingCog(commands.Cog):
+class PaperTradingCog(GuildOnlyHybridCog):
     """Discord Cog for paper trading frontend interactions."""
 
     def __init__(self, bot: KiwiBot) -> None:
@@ -49,6 +49,7 @@ class PaperTradingCog(commands.Cog):
         if not bot.trading_logic:
             msg = "TradingLogic not initialized on bot before cog setup."
             raise RuntimeError(msg)
+
         self.trading_logic: TradingLogic = self.bot.trading_logic
 
     # This is a special event that runs when the cog is loaded
@@ -103,6 +104,17 @@ class PaperTradingCog(commands.Cog):
                 "🆘 An unexpected internal error occurred. Please try again later.",
                 ephemeral=ephemeral,
             )
+
+    def _get_market_status_string(self) -> str:
+        """Get the formatted market status string."""
+        if self.trading_logic.is_market_open():
+            return "Market is OPEN"
+
+        # Market is closed, check for open time
+        market_status = "Market is CLOSED"
+        if next_open := self.trading_logic.price_cache.get_next_market_open_time():
+            market_status += f" | Opens {format_dt(next_open, 'R')}"
+        return market_status
 
     # --- Commands ---
     @commands.hybrid_command(name="buy", description="Buy shares of a stock.")
@@ -163,7 +175,8 @@ class PaperTradingCog(commands.Cog):
                 )
 
             if not self.trading_logic.is_market_open():
-                response_content += "\n\n⚠️ **Note: The market is closed. Position opened at the last available price.**"
+                market_status = self._get_market_status_string()
+                response_content += f"\n\n⚠️ **Note: {market_status}. Position opened at the last available price.**"
 
             await ctx.send(response_content, ephemeral=True)
 
@@ -232,7 +245,8 @@ class PaperTradingCog(commands.Cog):
                 )
 
             if not self.trading_logic.is_market_open():
-                response_content += "\n\n⚠️ **Note: The market is closed. Position opened at the last available price.**"
+                market_status = self._get_market_status_string()
+                response_content += f"\n\n⚠️ **Note: {market_status}. Position opened at the last available price.**"
 
             await ctx.send(response_content, ephemeral=True)
 
@@ -332,19 +346,14 @@ class PaperTradingCog(commands.Cog):
                 description="\n".join(price_list_lines),
             )
 
-            market_status = "Market is OPEN" if self.trading_logic.is_market_open() else "Market is CLOSED"
+            market_status = self._get_market_status_string()
 
             if last_update_time:
-                # Format the timestamp relative to the user
-                embed.set_footer(
-                    text=f"🇺🇸 {market_status} | Prices as of: {format_dt(last_update_time, 'R')}",
-                )
+                title = f"🇺🇸 {market_status} | Prices as of: {format_dt(last_update_time, 'R')}"
             else:
-                embed.set_footer(
-                    text=f"🇺🇸 {market_status} | Prices are currently unavailable.",
-                )
+                title = f"🇺🇸 {market_status} | Prices are currently unavailable."
 
-            await ctx.send(embed=embed, ephemeral=True)
+            await ctx.send(title, embed=embed, ephemeral=True)
 
         except Exception as e:  # noqa: BLE001
             # Use the existing error handler
@@ -459,7 +468,7 @@ class PaperTradingCog(commands.Cog):
                 inline=False,
             )
 
-            market_status = "Market is OPEN" if self.trading_logic.is_market_open() else "Market is CLOSED"
+            market_status = self._get_market_status_string()
             embed.set_footer(
                 text=f"🇺🇸 {market_status} | Use /close <ID> to close a position.",
             )

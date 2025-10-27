@@ -1,9 +1,10 @@
 import logging
 
 import discord
-from discord.ext import commands, tasks
+from discord.ext import tasks
 
 from modules.dtypes import GuildId
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.KiwiBot import KiwiBot
 
 # Set up basic logging
@@ -12,8 +13,7 @@ log = logging.getLogger(__name__)
 UPDATE_INTERVAL_MINUTES = 5
 
 
-@commands.guild_only()
-class ServerStats(commands.Cog):
+class ServerStats(GuildOnlyHybridCog):
     """A cog that automatically updates server statistics in designated voice channels."""
 
     def __init__(self, bot: KiwiBot) -> None:

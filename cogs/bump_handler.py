@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
 
-from modules.discord_utils import ping_online_role
+from modules.discord_utils import InvalidRoleError, ping_online_role
 from modules.dtypes import GuildId, PositiveInt, RoleId, UserId
 from modules.enums import StatName
 from modules.utils import format_ordinal
@@ -225,6 +225,12 @@ class BumpHandlerCog(commands.Cog):
             ping_text = await ping_online_role(role_to_ping, self.user_db) if role_to_ping else ""
 
             await channel.send(content=ping_text, embed=reminder_embed)
+        except InvalidRoleError:
+            log.exception(
+                "Failed to send %s reminder to %s. Role is invalid.",
+                "backup" if is_backup else "primary",
+                channel.name,
+            )
         except (discord.HTTPException, discord.Forbidden):
             log.exception(
                 "Failed to send %s reminder to %s.",

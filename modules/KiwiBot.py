@@ -1,7 +1,7 @@
 import logging
 import pathlib
 import time
-from typing import ClassVar, Final, Literal
+from typing import ClassVar, Literal
 
 import aiohttp
 import discord
@@ -60,6 +60,14 @@ class KiwiBot(commands.Bot):
         self.ledger_db = CurrencyLedgerDB(self.database)
         self.config_db = ConfigDB(self.database)
 
+        # AWAIT the post-initialization tasks to ensure tables are created
+        # UserDB must be first as other tables have foreign keys to it.
+        await self.user_db.post_init()
+        await self.task_db.post_init()
+        await self.invites_db.post_init()
+        await self.ledger_db.post_init()
+        await self.config_db.post_init()
+
         # Initialize TradingLogic if API key is present
         if self.config.twelvedata_api_key:
             self.trading_logic = TradingLogic(
@@ -70,22 +78,12 @@ class KiwiBot(commands.Bot):
                 self.http_session,
             )
             log.info("TradingLogic initialized.")
+            # Create the portfolios table
+            await self.trading_logic.post_init()
         else:
             log.warning(
                 "TWELVEDATA_API_KEY not set. Paper trading module will be unavailable.",
             )
-
-        # AWAIT the post-initialization tasks to ensure tables are created
-        # UserDB must be first as other tables have foreign keys to it.
-        await self.user_db.post_init()
-        await self.task_db.post_init()
-        await self.invites_db.post_init()
-        await self.ledger_db.post_init()
-        await self.config_db.post_init()
-
-        # Create the portfolios table
-        if self.trading_logic:
-            await self.trading_logic.post_init()
 
         log.info("All database tables initialized.")
 
@@ -136,22 +134,24 @@ class KiwiBot(commands.Bot):
         ):
             log.exception("Error syncing global commands")
 
-        if self.config.swl_guild_id:
-            SWL_GUILD: Final[discord.Object] = discord.Object(self.config.swl_guild_id)
-            try:
-                synced_guild = await self.tree.sync(guild=SWL_GUILD)
-                if synced_guild:
-                    log.info(
-                        "Synced %d command(s) for guild %d: %s",
-                        len(synced_guild),
-                        self.config.swl_guild_id,
-                        [i.name for i in synced_guild],
+        # Special one server cogs
+        for guild_id in (self.config.mc_guild_id, self.config.swl_guild_id):
+            if guild_id:
+                guild = discord.Object(guild_id)
+                try:
+                    synced_guild = await self.tree.sync(guild=guild)
+                    if synced_guild:
+                        log.info(
+                            "Synced %d command(s) for guild %d: %s",
+                            len(synced_guild),
+                            guild_id,
+                            [i.name for i in synced_guild],
+                        )
+                except (HTTPException, CommandSyncFailure, Forbidden):
+                    log.exception(
+                        "Error syncing guild commands for guild %d",
+                        guild_id,
                     )
-            except (HTTPException, CommandSyncFailure, Forbidden):
-                log.exception(
-                    "Error syncing guild commands for guild %d",
-                    self.config.swl_guild_id,
-                )
 
         log.info("Setup complete.")
 
@@ -281,6 +281,11 @@ class KiwiBot(commands.Bot):
         except commands.CommandOnCooldown as e:
             await ctx.send(
                 f"This command is on cooldown. Try again in {e.retry_after:.2f}s.",
+                ephemeral=True,
+            )
+        except commands.NoPrivateMessage:
+            await ctx.send(
+                "You may not use this command in DMs.",
                 ephemeral=True,
             )
         except commands.MissingPermissions as e:

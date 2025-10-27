@@ -6,6 +6,11 @@ We restrict stock quantities to two decimal places.
 And the rounding error of quantity * stock price is the slippage.
 We communicate this slippage as a "transaction fee".
 (While misleading it doubles as a subtle money sink.)
+
+There's also a known issue where someone can observe
+price changes IRL and then trade on the stale price.
+But this is necessary due to heavy API rate limits.
+Responsibility of guild owner to moderate abuse.
 """
 
 from __future__ import annotations  # Defer type annotation evaluation
@@ -51,17 +56,26 @@ CACHE_TTL: Final[int] = 300  # 5 minutes
 
 
 def _parse_api_time(time_str: str) -> datetime.timedelta | None:
-    """Parse 'HH:MM:SS' into a timedelta."""
+    """Parse 'HH:MM:SS' duration string into a timedelta."""
     if not time_str or time_str == "00:00:00":
         return None
 
     try:
-        # Use strptime to parse the time string
-        t = datetime.datetime.strptime(time_str, "%H:%M:%S").time()  # noqa: DTZ007
-        # Convert the time object to a timedelta
-        return datetime.timedelta(hours=t.hour, minutes=t.minute, seconds=t.second)
-    except ValueError:
-        # This catches any format mismatches
+        # Split the string into components
+        parts = time_str.split(":")
+        if len(parts) != 3:
+            msg = "Time string not in HH:MM:SS format"
+            raise ValueError(msg)
+
+        # Manually parse hours, minutes, and seconds as integers
+        hours = int(parts[0])
+        minutes = int(parts[1])
+        seconds = int(parts[2])
+
+        # Create a timedelta directly from the duration components
+        return datetime.timedelta(hours=hours, minutes=minutes, seconds=seconds)
+    except (ValueError, TypeError):
+        # This catches format mismatches or non-integer parts
         log.warning("Could not parse API time string: %s", time_str)
         return None
 
@@ -84,6 +98,7 @@ class PriceCache:
 
         # Caches the *actual* market state from the API
         self._market_state: dict[str, Any] | None = None
+        self._next_market_open: datetime.datetime | None = None
 
     def is_us_market_open(self) -> bool:
         """Check the *cached* market state. This is a synchronous, 0-cost check of the last known state."""
@@ -136,6 +151,7 @@ class PriceCache:
             # 3. Decide action based on market state
             if is_open:
                 # --- MARKET IS OPEN ---
+                self._next_market_open = None
                 # We must refresh prices
                 log.info("Market is OPEN. Refreshing batch prices.")
                 # --- API Call 2: Batch Prices (Uses 7 API credits) ---
@@ -196,9 +212,12 @@ class PriceCache:
 
                 if time_to_open_delta:
                     # We have a valid time! Schedule the next check.
-                    # Add a 15-second buffer to ensure market is *really* open.
                     buffer = datetime.timedelta(seconds=15)
-                    self._next_check_time = now_utc + time_to_open_delta + buffer
+
+                    # Store the *actual* open time
+                    actual_open_time = now_utc + time_to_open_delta
+                    self._next_market_open = actual_open_time
+                    self._next_check_time = actual_open_time + buffer  # Use the buffered time for the check
                     log.info(
                         "Next market check scheduled for %s (in %s)",
                         self._next_check_time,
@@ -206,6 +225,7 @@ class PriceCache:
                     )
                 else:
                     # API gave no 'time_to_open' (e.g., "00:00:00" on a weekend)
+                    self._next_market_open = None
                     # Fall back to a long poll (e.g., 1 hour).
                     log.warning(
                         "No 'time_to_open' provided. Falling back to 1-hour poll.",
@@ -227,6 +247,10 @@ class PriceCache:
         if price is not None and timestamp is not None:
             return price, timestamp
         return None, None
+
+    def get_next_market_open_time(self) -> datetime.datetime | None:
+        """Get the cached next market open time, if available."""
+        return self._next_market_open
 
 
 # --- Custom Exceptions (can be shared or defined here) ---
@@ -558,7 +582,7 @@ class TradingLogic:
 
                 # 4. Apply Slippage (The Money Sink)
                 # We floor the credit. e.g., 116.66 -> 116.
-                final_credit_int = math.floor(total_credit_precise)
+                final_credit_int = math.floor(max(0, total_credit_precise))
 
                 # 5. Update Bank Account
                 await self._update_cash_balance(

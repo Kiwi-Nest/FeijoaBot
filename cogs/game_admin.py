@@ -1,4 +1,3 @@
-# cogs/game_admin.py
 import logging
 
 import discord
@@ -14,24 +13,32 @@ log = logging.getLogger(__name__)
 
 
 # --- The Main Cog Class ---
-@app_commands.guild_only()
-@app_commands.default_permissions(kick_members=True)
-class GameAdmin(commands.Cog):
-    """A cog for managing game servers via Discord."""
-
-    server = app_commands.Group(
-        name="server",
-        description="Commands for game server administration.",
-    )
+@commands.guild_only()
+@app_commands.default_permissions(ban_members=True, kick_members=True)
+@app_commands.checks.cooldown(5, 10.0, key=lambda i: (i.guild_id, i.user.id))
+class GameAdmin(
+    commands.GroupCog,
+    group_name="server",
+    group_description="Commands for game server administration.",
+):
+    """A cog for managing game servers via Discord, using GroupCog."""
 
     def __init__(self, bot: KiwiBot) -> None:
         self.bot = bot
         # The manager now comes directly from the bot instance
         self.manager: ServerManager | None = self.bot.server_manager
-        # Point the group to the guild ID from the bot's config
-        self.server.guild_ids = [bot.config.mc_guild_id] if bot.config.mc_guild_id else None
+        super().__init__()
 
-    # --- Autocomplete Callbacks ---
+    # --- Centralized Pre-Command Check ---
+
+    async def interaction_check(self, _interaction: discord.Interaction) -> bool:
+        """Central check to ensure the Server Manager is running."""
+        if not self.manager:
+            msg = "❌ The Server Manager is not running. Check bot logs."
+            raise app_commands.CheckFailure(msg)
+        return True
+
+    # --- Autocomplete Callbacks (Unaffected by interaction_check) ---
 
     async def _autocomplete_all_servers(
         self,
@@ -133,15 +140,11 @@ class GameAdmin(commands.Cog):
 
     # --- Commands ---
 
-    @server.command(name="list", description="Shows the status of all managed servers.")
+    @app_commands.command(name="list", description="Shows the status of all managed servers.")
     async def list_servers(self, interaction: discord.Interaction) -> None:
         """Display an overview of all online and offline servers."""
         await interaction.response.defer()
-        if not self.manager:
-            await interaction.followup.send(
-                "❌ The Server Manager is not running. Check bot logs.",
-            )
-            return
+        # No 'if not self.manager' check needed here.
 
         embed = discord.Embed(
             title="Server Status Overview",
@@ -158,7 +161,7 @@ class GameAdmin(commands.Cog):
 
         await interaction.followup.send(embed=embed)
 
-    @server.command(
+    @app_commands.command(
         name="status",
         description="Shows detailed status for a specific server.",
     )
@@ -167,14 +170,11 @@ class GameAdmin(commands.Cog):
     async def status(self, interaction: discord.Interaction, server: str) -> None:
         """Show detailed information about a single server."""
         await interaction.response.defer()
-        if not self.manager:
-            await interaction.followup.send(
-                "❌ The Server Manager is not running. Check bot logs.",
-            )
-            return
+        # No 'if not self.manager' check needed here.
 
         info = self.manager.all_servers.get(server)
         if not info:
+            # This check is specific to this command and remains.
             await interaction.followup.send(f"❌ Server `{server}` not found.")
             return
 
@@ -187,11 +187,11 @@ class GameAdmin(commands.Cog):
             value=f"Enabled (`{info.rcon_port}`)" if info.rcon_enabled else "Disabled",
             inline=True,
         )
-        embed.set_footer(text=f"Full Path: {info.path}")
+        # Don't leak server path
 
         await interaction.followup.send(embed=embed)
 
-    @server.command(name="start", description="Starts an offline server.")
+    @app_commands.command(name="start", description="Starts an offline server.")
     @app_commands.autocomplete(server=_autocomplete_offline_servers)
     @app_commands.describe(
         server="The server to start.",
@@ -205,11 +205,7 @@ class GameAdmin(commands.Cog):
     ) -> None:
         """Handle the logic to start a game server."""
         await interaction.response.defer()
-        if not self.manager:
-            await interaction.followup.send(
-                "❌ The Server Manager is not running. Check bot logs.",
-            )
-            return
+        # No 'if not self.manager' check needed here.
 
         await self.manager.start(server)
         await interaction.followup.send(
@@ -223,7 +219,7 @@ class GameAdmin(commands.Cog):
             color=discord.Color.green(),
         )
 
-    @server.command(name="stop", description="Stops an online server.")
+    @app_commands.command(name="stop", description="Stops an online server.")
     @app_commands.autocomplete(server=_autocomplete_online_servers)
     @app_commands.describe(
         server="The server to stop.",
@@ -237,11 +233,7 @@ class GameAdmin(commands.Cog):
     ) -> None:
         """Handle the logic to stop a game server."""
         await interaction.response.defer()
-        if not self.manager:
-            await interaction.followup.send(
-                "❌ The Server Manager is not running. Check bot logs.",
-            )
-            return
+        # No 'if not self.manager' check needed here.
 
         await self.manager.stop(server)
         await interaction.followup.send(
@@ -255,7 +247,7 @@ class GameAdmin(commands.Cog):
             color=discord.Color.orange(),
         )
 
-    @server.command(name="rcon", description="Sends a command to a server via RCON.")
+    @app_commands.command(name="rcon", description="Sends a command to a server via RCON.")
     @app_commands.autocomplete(server=_autocomplete_rcon_servers)
     @app_commands.describe(
         server="The server to send the command to.",
@@ -271,11 +263,7 @@ class GameAdmin(commands.Cog):
     ) -> None:
         """Send an RCON command to an online server."""
         await interaction.response.defer()
-        if not self.manager:
-            await interaction.followup.send(
-                "❌ The Server Manager is not running. Check bot logs.",
-            )
-            return
+        # No 'if not self.manager' check needed here.
 
         response = await self.manager.run_rcon(server, command)
 
@@ -297,7 +285,7 @@ class GameAdmin(commands.Cog):
             details=f"Command: `{command}`",
         )
 
-    @server.command(
+    @app_commands.command(
         name="refresh",
         description="Forces the bot to re-scan all server statuses.",
     )
@@ -309,11 +297,7 @@ class GameAdmin(commands.Cog):
     ) -> None:
         """Trigger a manual refresh of the server list."""
         await interaction.response.defer()
-        if not self.manager:
-            await interaction.followup.send(
-                "❌ The Server Manager is not running. Check bot logs.",
-            )
-            return
+        # No 'if not self.manager' check needed here.
 
         await self.manager.force_refresh()
         await interaction.followup.send(
@@ -327,6 +311,8 @@ class GameAdmin(commands.Cog):
             color=discord.Color.purple(),
         )
 
+    # --- Centralized Error Handler ---
+
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         """Handle errors for all commands in this cog."""
         # Get the root cause of the error
@@ -336,16 +322,22 @@ class GameAdmin(commands.Cog):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
 
-        if isinstance(original, (ServerNotFoundError, ServerStateError, RCONConnectionError)):
+        if isinstance(error, app_commands.CheckFailure):
+            # Catches the "Manager not running" check from interaction_check
+            await interaction.followup.send(f"{error}", ephemeral=True)
+        elif isinstance(original, (ServerNotFoundError, ServerStateError, RCONConnectionError)):
             # These are "safe" errors to show the user
-            await interaction.followup.send(f"⚠️ {original}")
+            await interaction.followup.send(f"⚠️ {original}", ephemeral=True)
         elif isinstance(original, CommandExecutionError):
             log.exception(
                 "A server script failed for '%s': %s",
                 interaction.command.name,
                 {original.stderr},
             )
-            await interaction.followup.send("❌ The server script failed to execute. Check bot logs for details.")
+            await interaction.followup.send(
+                "❌ The server script failed to execute. Check bot logs for details.",
+                ephemeral=True,
+            )
         else:
             log.exception("An unexpected error occurred in a game admin command.")
             await interaction.followup.send("❌ An unexpected error occurred.", ephemeral=True)
@@ -358,4 +350,4 @@ async def setup(bot: KiwiBot) -> None:
             "GameAdmin cog not loaded. Missing 'MC_GUILD_ID' or 'SERVERS_PATH' in config.",
         )
         return
-    await bot.add_cog(GameAdmin(bot))
+    await bot.add_cog(GameAdmin(bot), guild=discord.Object(bot.config.mc_guild_id))

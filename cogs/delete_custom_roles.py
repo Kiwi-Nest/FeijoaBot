@@ -63,15 +63,15 @@ class RolePrunerCog(commands.Cog):
 
             # Prune the identified roles
             for role in roles_to_prune:
-                is_safe, safe_err = is_role_safe(role, require_no_permissions=True)  # Checks for 0 perms
-                is_high_enough, hier_err = is_bot_hierarchy_sufficient(guild, role)
+                safe_result = is_role_safe(role, require_no_permissions=True)  # Checks for 0 perms
+                hierarchy_result = is_bot_hierarchy_sufficient(guild, role)
 
-                if not is_safe:
-                    log.warning("Skipping deletion of role '%s' in %s: %s", role.name, guild.name, safe_err)
+                if not safe_result.ok:
+                    log.warning("Skipping deletion of role '%s' in %s: %s", role.name, guild.name, safe_result.reason)
                     continue
 
-                if not is_high_enough:
-                    log.warning("Skipping deletion of role '%s' in %s: %s", role.name, guild.name, hier_err)
+                if not hierarchy_result.ok:
+                    log.warning("Skipping deletion of role '%s' in %s: %s", role.name, guild.name, hierarchy_result.reason)
                     continue
 
                 try:
