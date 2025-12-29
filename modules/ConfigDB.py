@@ -89,26 +89,40 @@ class ConfigDB:
                 f"""
                 CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
                     -- Core Identity
-                    guild_id INTEGER PRIMARY KEY CHECK(guild_id > 1000000),
+                    guild_id INTEGER PRIMARY KEY CHECK(guild_id > 1000000 AND
+                                                guild_id < 10000000000000000000),
 
                     -- Configurable Channel IDs (Nullable)
-                    mod_log_channel_id      INTEGER CHECK(mod_log_channel_id > 1000000),
-                    join_leave_log_channel_id INTEGER CHECK(join_leave_log_channel_id > 1000000),
-                    level_up_channel_id     INTEGER CHECK(level_up_channel_id > 1000000),
-                    bot_warning_channel_id  INTEGER CHECK(bot_warning_channel_id > 1000000),
+                    mod_log_channel_id      INTEGER CHECK(mod_log_channel_id > 1000000 AND
+                                                mod_log_channel_id < 10000000000000000000),
+                    join_leave_log_channel_id INTEGER CHECK(join_leave_log_channel_id > 1000000 AND
+                                                join_leave_log_channel_id < 10000000000000000000),
+                    level_up_channel_id     INTEGER CHECK(level_up_channel_id > 1000000 AND
+                                                level_up_channel_id < 10000000000000000000),
+                    bot_warning_channel_id  INTEGER CHECK(bot_warning_channel_id > 1000000 AND
+                                                bot_warning_channel_id < 10000000000000000000),
 
                     -- Configurable Role IDs (Nullable)
-                    bumper_role_id          INTEGER CHECK(bumper_role_id > 1000000),
-                    backup_bumper_role_id   INTEGER CHECK(backup_bumper_role_id > 1000000),
-                    muted_role_id           INTEGER CHECK(muted_role_id > 1000000),
-                    verified_role_id        INTEGER CHECK(verified_role_id > 1000000),
-                    automute_role_id        INTEGER CHECK(automute_role_id > 1000000),
-                    xp_opt_out_role_id      INTEGER CHECK(xp_opt_out_role_id > 1000000),
+                    bumper_role_id          INTEGER CHECK(bumper_role_id > 1000000 AND
+                                                bumper_role_id < 10000000000000000000),
+                    backup_bumper_role_id   INTEGER CHECK(backup_bumper_role_id > 1000000 AND
+                                                backup_bumper_role_id < 10000000000000000000),
+                    muted_role_id           INTEGER CHECK(muted_role_id > 1000000 AND
+                                                muted_role_id < 10000000000000000000),
+                    verified_role_id        INTEGER CHECK(verified_role_id > 1000000 AND
+                                                verified_role_id < 10000000000000000000),
+                    automute_role_id        INTEGER CHECK(automute_role_id > 1000000 AND
+                                                automute_role_id < 10000000000000000000),
+                    xp_opt_out_role_id      INTEGER CHECK(xp_opt_out_role_id > 1000000 AND
+                                                xp_opt_out_role_id < 10000000000000000000),
 
                     -- Server Stats Channel/Role IDs (Nullable)
-                    member_count_channel_id INTEGER CHECK(member_count_channel_id > 1000000),
-                    tag_role_id             INTEGER CHECK(tag_role_id > 1000000),
-                    tag_role_channel_id     INTEGER CHECK(tag_role_channel_id > 1000000),
+                    member_count_channel_id INTEGER CHECK(member_count_channel_id > 1000000 AND
+                                                member_count_channel_id < 10000000000000000000),
+                    tag_role_id             INTEGER CHECK(tag_role_id > 1000000 AND
+                                                tag_role_id < 10000000000000000000),
+                    tag_role_channel_id     INTEGER CHECK(tag_role_channel_id > 1000000 AND
+                                                tag_role_channel_id < 10000000000000000000),
 
                     -- Pruning Settings
                     roles_to_prune          TEXT, -- Comma-separated list of role IDs
@@ -118,8 +132,10 @@ class ConfigDB:
                     custom_role_prefix      TEXT NOT NULL DEFAULT 'Custom: ',
                     custom_role_prune_days  INTEGER NOT NULL DEFAULT 30 CHECK(custom_role_prune_days > 0),
 
-                    qotd_source_bot_id      INTEGER CHECK(qotd_source_bot_id > 1000000),
-                    qotd_target_channel_id  INTEGER CHECK(qotd_target_channel_id > 1000000)
+                    qotd_source_bot_id      INTEGER CHECK(qotd_source_bot_id > 1000000 AND
+                                                qotd_source_bot_id < 10000000000000000000),
+                    qotd_target_channel_id  INTEGER CHECK(qotd_target_channel_id > 1000000 AND
+                                                qotd_target_channel_id < 10000000000000000000)
 
                 ) STRICT, WITHOUT ROWID;
                 """,

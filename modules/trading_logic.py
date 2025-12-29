@@ -296,8 +296,8 @@ class TradingLogic:
                 """
                 CREATE TABLE IF NOT EXISTS positions (
                     position_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id         INTEGER NOT NULL CHECK(user_id > 1000000),
-                    guild_id        INTEGER NOT NULL CHECK(guild_id > 1000000),
+                    user_id         INTEGER NOT NULL CHECK(user_id > 1000000 AND user_id < 10000000000000000000),
+                    guild_id        INTEGER NOT NULL CHECK(guild_id > 1000000 AND guild_id < 10000000000000000000),
                     ticker          TEXT NOT NULL,
                     notional_dollars INTEGER NOT NULL CHECK(notional_dollars != 0),
                     collateral_dollars INTEGER NOT NULL CHECK(collateral_dollars > 0),

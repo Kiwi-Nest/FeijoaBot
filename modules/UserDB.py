@@ -9,9 +9,10 @@ constraints and generated columns to enforce data integrity.
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, ClassVar
 
-from modules.CurrencyLedgerDB import SYSTEM_USER_ID
+from modules.CurrencyLedgerDB import COLLATERAL_POOL_ID, SYSTEM_USER_ID
 from modules.dtypes import GuildId, NonNegativeInt, PositiveInt, ReminderPreference, UserGuildPair, UserId
 from modules.enums import StatName
 
@@ -36,8 +37,10 @@ class UserDB:
                 f"""
                 CREATE TABLE IF NOT EXISTS {self.USERS_TABLE} (
                     -- Core Identity
-                    discord_id                  INTEGER NOT NULL CHECK(discord_id > 1000000),
-                    guild_id                    INTEGER NOT NULL CHECK(guild_id > 1000000),
+                    discord_id                  INTEGER NOT NULL CHECK(discord_id > 1000000 AND
+                                                    discord_id < 10000000000000000000),
+                    guild_id                    INTEGER NOT NULL CHECK(guild_id > 1000000 AND
+                                                    guild_id < 10000000000000000000),
 
                     -- Stats (from former user_stats table)
                     currency                    INTEGER NOT NULL DEFAULT 0 CHECK(currency >= 0),
@@ -45,7 +48,8 @@ class UserDB:
                     xp                          INTEGER NOT NULL DEFAULT 0 CHECK(xp >= 0),
 
                     -- Generated Level Column
-                    level                       INTEGER GENERATED ALWAYS AS (CAST(floor(pow(max(xp - 6, 0), 1.0/2.5)) AS INTEGER))
+                    level                       INTEGER GENERATED ALWAYS AS
+                                                (CAST(floor(pow(max(xp - 6, 0), 1.0/2.5)) AS INTEGER))
                     STORED,
 
                     -- Preferences & State
@@ -54,6 +58,7 @@ class UserDB:
                     CHECK(daily_reminder_preference IN ('NEVER', 'ONCE', 'ALWAYS')),
 
                     has_claimed_daily           INTEGER NOT NULL DEFAULT 0 CHECK(has_claimed_daily IN (0, 1)),
+                    native_language             TEXT DEFAULT 'en',
 
                     -- Keys & Constraints
                     PRIMARY KEY (discord_id, guild_id)
@@ -466,11 +471,10 @@ class UserDB:
         amount: PositiveInt,
     ) -> NonNegativeInt:
         """Atomically increments a user's stat and returns the new value."""
-        # --- ADD THIS GUARD CLAUSE ---
-        if stat is StatName.CURRENCY:
+        if stat == StatName.CURRENCY:
             msg = "Cannot use increment_stat for currency. Use mint_currency instead."
             raise PermissionError(msg)
-        # --- END OF GUARD CLAUSE ---
+
         # stat.value is 'currency', 'bumps', or 'xp' which we safely use to build the query
         sql = f"""
             INSERT INTO {self.USERS_TABLE} (discord_id, guild_id, {stat.value})
@@ -495,11 +499,10 @@ class UserDB:
         amount: PositiveInt,
     ) -> int | None:
         """Atomically decrements a user's stat if they have sufficient value."""
-        # --- ADD THIS GUARD CLAUSE ---
-        if stat is StatName.CURRENCY:
+        if stat == StatName.CURRENCY:
             msg = "Cannot use decrement_stat for currency. Use burn_currency instead."
             raise PermissionError(msg)
-        # --- END OF GUARD CLAUSE ---
+
         sql = f"""
             UPDATE {self.USERS_TABLE}
             SET {stat.value} = {stat.value} - ?
@@ -522,11 +525,10 @@ class UserDB:
         value: int,
     ) -> None:
         """Atomically sets a user's stat to a specific value."""
-        # --- ADD THIS GUARD CLAUSE ---
-        if stat is StatName.CURRENCY:
+        if stat == StatName.CURRENCY:
             msg = "Cannot use set_stat for currency. Use set_currency_balance_and_log instead."
             raise PermissionError(msg)
-        # --- END OF GUARD CLAUSE ---
+
         sql = f"""
             INSERT INTO {self.USERS_TABLE} (discord_id, guild_id, {stat.value})
             VALUES (?, ?, ?)
@@ -628,3 +630,144 @@ class UserDB:
                 (user_id, guild_id),
             )
             return await cursor.fetchone()
+
+    async def apply_wealth_tax(
+        self,
+        guild_id: GuildId,
+        exponent: float,
+        ledger_db: CurrencyLedgerDB,
+        initiator_id: UserId,
+    ) -> tuple[int, int]:
+        """Apply a progressive wealth tax (val^x) to all users' cash and stock collateral.
+
+        Returns:
+            tuple[int, int]: (count_of_users_affected, total_amount_burned)
+
+        """
+        total_burned = 0
+        affected_users = set()
+        ledger_events = []
+
+        # We will perform updates in batches
+        cash_updates = []
+        stock_updates = []
+
+        async with self.database.get_conn() as conn:
+            # 1. Calculate Tax on Cash
+            async with conn.execute(
+                f"SELECT discord_id, currency FROM {self.USERS_TABLE} WHERE guild_id = ? AND currency > 10",  # noqa: S608
+                (guild_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+            for uid, old_balance in rows:
+                new_balance = math.ceil(pow(old_balance, exponent))
+                tax = old_balance - new_balance
+
+                if tax > 0:
+                    total_burned += tax
+                    affected_users.add(UserId(uid))
+                    cash_updates.append((new_balance, uid, guild_id))
+                    ledger_events.append(
+                        (
+                            guild_id,
+                            "BURN",
+                            "WEALTH_TAX",
+                            uid,
+                            SYSTEM_USER_ID,
+                            tax,
+                            initiator_id,
+                        ),
+                    )
+
+            # 2. Calculate Tax on Stocks
+            async with conn.execute(
+                """SELECT position_id, user_id, collateral_dollars,
+                notional_dollars FROM positions WHERE guild_id = ? AND collateral_dollars > 10""",
+                (guild_id,),
+            ) as cursor:
+                rows = await cursor.fetchall()
+
+            for pos_id, uid, old_collat, old_notional in rows:
+                new_collat = math.ceil(pow(old_collat, exponent))
+                tax = old_collat - new_collat
+
+                if tax > 0:
+                    # Calculate new notional to maintain leverage ratio
+                    ratio = new_collat / old_collat
+                    new_notional = int(old_notional * ratio)
+
+                    # Safety check: Prevent calculation from rounding to 0
+                    if abs(new_notional) < 1:
+                        continue
+
+                    total_burned += tax
+                    affected_users.add(UserId(uid))
+                    stock_updates.append((new_collat, new_notional, pos_id))
+
+                    ledger_events.append(
+                        (
+                            guild_id,
+                            "BURN",
+                            "WEALTH_TAX_COLLATERAL",
+                            COLLATERAL_POOL_ID,
+                            SYSTEM_USER_ID,
+                            tax,
+                            initiator_id,
+                        ),
+                    )
+
+            # 3. Execute Updates
+            if cash_updates:
+                await conn.executemany(
+                    f"UPDATE {self.USERS_TABLE} SET currency = ? WHERE discord_id = ? AND guild_id = ?",  # noqa: S608
+                    cash_updates,
+                )
+
+            if stock_updates:
+                await conn.executemany(
+                    "UPDATE positions SET collateral_dollars = ?, notional_dollars = ? WHERE position_id = ?",
+                    stock_updates,
+                )
+
+            # 4. Log Events
+            if ledger_events:
+                await ledger_db.bulk_log_event(conn, ledger_events)
+
+            await conn.commit()
+
+        return len(affected_users), total_burned
+
+    async def set_native_language(
+        self,
+        user_id: UserId,
+        guild_id: GuildId,
+        language: str | None,
+    ) -> None:
+        """Set the user's native language for auto-translation."""
+        async with self.database.get_conn() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self.USERS_TABLE} (discord_id, guild_id, native_language)
+                VALUES (?, ?, ?)
+                ON CONFLICT(discord_id, guild_id) DO UPDATE SET
+                    native_language = excluded.native_language
+                """,  # noqa: S608
+                (user_id, guild_id, language),
+            )
+            await conn.commit()
+
+    async def get_native_language(
+        self,
+        user_id: UserId,
+        guild_id: GuildId,
+    ) -> str | None:
+        """Get the user's native language preference."""
+        async with self.database.get_cursor() as cursor:
+            await cursor.execute(
+                f"SELECT native_language FROM {self.USERS_TABLE} WHERE discord_id = ? AND guild_id = ?",  # noqa: S608
+                (user_id, guild_id),
+            )
+            result = await cursor.fetchone()
+            # result[0] is the language code string
+            return result[0] if result else None

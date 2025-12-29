@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Final
 
 import discord
+from discord.permissions import Permissions
 
 # A context that has an actor (a user/member) and a guild.
 # Used for functions that can be triggered by either a message or interaction.
@@ -25,6 +26,39 @@ class ValidationResult:
     reason: str | None = None
 
 
+# A permissions object representing all perms allowed for a "verified" role.
+# This is a role that is safe to assign, but not purely cosmetic.
+# It grants basic participation permissions without any moderation capabilities.
+VERIFIED_ROLE_PERMISSIONS: Final[Permissions] = Permissions(
+    view_channel=True,
+    view_audit_log=True,
+    create_instant_invite=True,
+    change_nickname=True,
+    send_messages=True,
+    send_messages_in_threads=True,
+    create_public_threads=True,
+    create_private_threads=True,
+    embed_links=True,
+    attach_files=True,
+    add_reactions=True,
+    use_external_emojis=True,
+    use_external_stickers=True,
+    read_message_history=True,
+    send_voice_messages=True,
+    set_voice_channel_status=True,
+    connect=True,
+    speak=True,
+    stream=True,  # 'video' permission
+    use_soundboard=True,
+    use_external_sounds=True,
+    use_voice_activation=True,
+    request_to_speak=True,
+    use_application_commands=True,
+    use_embedded_activities=True,
+    use_external_apps=True,
+)
+
+
 # --- Custom Exception ---
 
 
@@ -37,45 +71,68 @@ class SecurityCheckError(Exception):
 
 def validate_role_safety(
     role: discord.Role,
-    *,
-    require_no_permissions: bool = False,
 ) -> None:
-    """Check if a role is safe to be configured.
+    """Check if a role is safe (i.e., has **no permissions**).
+
+    This is for purely cosmetic roles. For roles with allowed
+    permissions (e.g., a "verified" role), use
+    `validate_verifiable_role` instead.
 
     Raises:
-        SecurityCheckError: If the role is dangerous or has permissions
-            when `require_no_permissions` is True.
+        SecurityCheckError: If the role has any permissions or is @everyone.
 
     """
-    # 1. Check for roles that must be purely cosmetic
-    if require_no_permissions and role.permissions != discord.Permissions.none():
-        msg = f"Role {role.mention} must have **no permissions** to be used for this feature."
-        raise SecurityCheckError(msg)
-
-    # 2. Always reject @everyone
+    # 1. Always reject @everyone
     if role.is_default():
         msg = "The @everyone role cannot be used for this feature."
         raise SecurityCheckError(msg)
 
-    # 3. Check for dangerous permissions on ANY role
-    if role.permissions.administrator:
-        msg = f"Role {role.mention} has **Administrator** permissions and cannot be used."
+    # 2. Check for roles that must be purely cosmetic
+    if role.permissions != discord.Permissions.none():
+        msg = f"Role {role.mention} must have **no permissions** to be used for this feature."
         raise SecurityCheckError(msg)
 
-    dangerous_perms = {
-        "Manage Guild": role.permissions.manage_guild,
-        "Manage Roles": role.permissions.manage_roles,
-        "Manage Messages": role.permissions.manage_messages,
-        "Kick Members": role.permissions.kick_members,
-        "Ban Members": role.permissions.ban_members,
-        "Move Members": role.permissions.move_members,
-        "Moderate Members": role.permissions.moderate_members,
-    }
 
-    if any(dangerous_perms.values()):
-        # Create a clean list of the dangerous perms found
-        found_perms = [name for name, has in dangerous_perms.items() if has]
-        msg = f"Role {role.mention} has dangerous permissions ({', '.join(found_perms)}) and cannot be used."
+def validate_verifiable_role(role: discord.Role) -> None:
+    """Check if a role is safe to be used as a "verified" role.
+
+    This checks that the role does not have dangerous permissions
+    by ensuring it only has permissions from an explicit allow-list
+    (VERIFIED_ROLE_PERMISSIONS).
+
+    Raises:
+        SecurityCheckError: If the role is @everyone or has permissions
+            that are not on the allowed list.
+
+    """
+    # 1. Always reject @everyone
+    if role.is_default():
+        msg = "The @everyone role cannot be used for this feature."
+        raise SecurityCheckError(msg)
+
+    # 2. Check if all permissions are within the allowed set
+    # (role.permissions | VERIFIED_ROLE_PERMISSIONS) is the union of perms
+    # If this union is *different* from the allowed perms, it means
+    # the role has permissions that are *not* in the allowed list.
+    if (role.permissions | VERIFIED_ROLE_PERMISSIONS) != VERIFIED_ROLE_PERMISSIONS:
+        # Find the extra permissions
+        disallowed_perms = role.permissions & ~VERIFIED_ROLE_PERMISSIONS
+
+        # Get the names of the disallowed perms
+        found_perms = [name for name, has in disallowed_perms if has]
+
+        if not found_perms:
+            # If the list is empty but the check failed, it means there are
+            # residual bits set that discord.py does not have a name for yet.
+            # We report the raw value so the developer can investigate.
+            msg = (
+                f"Role {role.mention} has unknown disallowed permissions "
+                f"(raw bitfield value: {disallowed_perms.value}). "
+                "This usually indicates a new Discord permission not yet supported by your library version."
+            )
+            raise SecurityCheckError(msg)
+
+        msg = f"Role {role.mention} has permissions that are not allowed for a verified role: {', '.join(found_perms)}"
         raise SecurityCheckError(msg)
 
 
@@ -153,22 +210,33 @@ def validate_moderation_action(
 
 def is_role_safe(
     role: discord.Role,
-    *,
-    require_no_permissions: bool = False,
 ) -> ValidationResult:
-    """Check if a role is safe for non-command logic.
+    """Check if a role is safe (i.e., has **no permissions**).
 
-    Checks for dangerous permissions AND optionally requires zero permissions.
+    This is a boolean-returning version for non-command logic.
     We also never allow the bot to use @everyone.
     """
     try:
-        validate_role_safety(
-            role,
-            require_no_permissions=require_no_permissions,
-        )
+        validate_role_safety(role)
     except SecurityCheckError as e:
         # Log the reason for internal debugging
         log.debug("Role %d failed safety check: %s", role.id, e)
+        return ValidationResult(False, str(e))
+
+    return ValidationResult(True)
+
+
+def is_verifiable_role(role: discord.Role) -> ValidationResult:
+    """Check if a role is safe for a verified member.
+
+    Checks that the role only contains permissions from the
+    VERIFIED_ROLE_PERMISSIONS allow-list.
+    """
+    try:
+        validate_verifiable_role(role)
+    except SecurityCheckError as e:
+        # Log the reason for internal debugging
+        log.debug("Role %d failed verifiable role check: %s", role.id, e)
         return ValidationResult(False, str(e))
 
     return ValidationResult(True)

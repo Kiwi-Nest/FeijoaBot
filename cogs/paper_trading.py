@@ -468,12 +468,12 @@ class PaperTradingCog(GuildOnlyHybridCog):
                 inline=False,
             )
 
-            market_status = self._get_market_status_string()
             embed.set_footer(
-                text=f"🇺🇸 {market_status} | Use /close <ID> to close a position.",
+                text="Use /close <ID> to close a position.",
             )
 
-            await ctx.send(embed=embed, ephemeral=True)
+            market_status = self._get_market_status_string()
+            await ctx.send(f"🇺🇸 {market_status}", embed=embed, ephemeral=True)
 
         except Exception as e:  # noqa: BLE001
             await self._handle_trading_errors(ctx, e)
@@ -487,7 +487,8 @@ class PaperTradingCog(GuildOnlyHybridCog):
         """Display the list of tradable stocks."""
         embed = discord.Embed(
             title="Tradable Leveraged ETFs",
-            description="Here are the currently supported assets for paper trading. All are leveraged ETFs and are intended for short-term trading.",  # noqa: E501
+            description="Here are the currently supported assets for paper trading. \
+All are leveraged ETFs and are intended for short-term trading.",
             color=discord.Colour.blurple(),
         )
 

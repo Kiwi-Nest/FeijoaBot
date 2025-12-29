@@ -98,7 +98,7 @@ class BumpHandlerCog(commands.Cog):
 
         try:
             if is_new_bump:
-                reward = PositiveInt(random.randint(50, 80))
+                reward = PositiveInt(random.randint(30, 50))
                 user_id = UserId(bumper.id)
                 # Reward Currency
                 await self.bot.user_db.mint_currency(

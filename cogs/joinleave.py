@@ -6,7 +6,7 @@ import discord
 from discord.ext import commands
 
 from modules.dtypes import GuildId, RoleId, UserId
-from modules.security_utils import is_bot_hierarchy_sufficient, is_role_safe
+from modules.security_utils import is_bot_hierarchy_sufficient, is_verifiable_role
 from modules.utils import format_ordinal
 
 if TYPE_CHECKING:
@@ -106,17 +106,18 @@ class JoinLeaveLogCog(commands.Cog):
         if user_indicators and verified_role_id:
             role = member.guild.get_role(verified_role_id)
             if role:
-                # Allow view message send message and other safe permissions
-                safe_result = is_role_safe(role, require_no_permissions=False)
+                # Check that the role only has permissions from the allowed list
+                verified_result = is_verifiable_role(role)
                 hierarchy_result = is_bot_hierarchy_sufficient(member.guild, role)
 
-                if not safe_result.ok:
+                if not verified_result.ok:
                     await self.bot.log_admin_warning(
                         guild_id=GuildId(member.guild.id),
                         warning_type="dangerous_role_assignment",
                         description=(
                             f"**Blocked** auto-verification for {member.mention}. "
-                            f"The configured `verified_role_id` ({role.mention}) is not safe: {safe_result.reason}"
+                            f"The configured `verified_role_id` ({role.mention}) has disallowed permissions: "
+                            f"{verified_result.reason}"
                         ),
                         level="ERROR",
                     )

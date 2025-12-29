@@ -23,7 +23,6 @@ EventReason = Literal[
     "TRADE_CLOSE_COLLATERAL",
     "TRADE_PROFIT",
     "TRADE_LOSS",
-    # --- ADD THESE NEW REASONS ---
     "BUMP_SERVER",  # For cogs/bump_handler.py
     "HARVEST_SALE",  # For cogs/s_w_l.py
     "BLACKJACK_BET",  # For /blackjack and "Play Again"
@@ -35,6 +34,9 @@ EventReason = Literal[
     "BLACKJACK_PUSH",  # For push (1:1) return
     "ADMIN_SET",  # For admin commands
     "ADMIN_REMOVE",  # For admin commands
+    "ADMIN_MINT",  # For admin mint command
+    "WEALTH_TAX",  # For wealth tax on cash
+    "WEALTH_TAX_COLLATERAL",  # For wealth tax on stocks
 ]
 
 
@@ -55,7 +57,7 @@ class CurrencyLedgerDB:
                 CREATE TABLE IF NOT EXISTS {self.TABLE_NAME} (
                     -- Core Fields
                     ledger_id       INTEGER PRIMARY KEY,
-                    guild_id        INTEGER NOT NULL CHECK(guild_id > 1000000),
+                    guild_id        INTEGER NOT NULL CHECK(guild_id > 1000000 AND guild_id < 10000000000000000000),
                     timestamp       TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
 
                     -- Event Type
@@ -72,7 +74,7 @@ class CurrencyLedgerDB:
                     amount          INTEGER NOT NULL CHECK(amount > 0),
 
                     -- Audit Trail
-                    initiator_id    INTEGER CHECK(initiator_id > 1000000),
+                    initiator_id    INTEGER CHECK(initiator_id > 1000000 AND initiator_id < 10000000000000000000),
                     reference_id    TEXT,
 
                     CHECK(sender_id <> receiver_id)
@@ -127,3 +129,18 @@ class CurrencyLedgerDB:
         )
         await conn.execute(sql, params)
         log.debug("Logged currency event: %s - %s", event_type, event_reason)
+
+    async def bulk_log_event(
+        self,
+        conn: aiosqlite.Connection,
+        events: list[tuple[GuildId, EventType, EventReason, int, int, int, UserId | None]],
+    ) -> None:
+        """Efficiently log multiple events in one go."""
+        if not events:
+            return
+
+        sql = f"""
+            INSERT INTO {self.TABLE_NAME} (guild_id, event_type, event_reason, sender_id,
+            receiver_id, amount, initiator_id) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """  # noqa: S608
+        await conn.executemany(sql, events)

@@ -253,7 +253,7 @@ class Daily(GuildOnlyHybridCog):
             return
 
         # Simplified reward logic: 1% chance for a jackpot, 99% for a standard reward.
-        daily_mon = PositiveInt(random.randint(101, 2000) if random.random() < 0.01 else random.randint(50, 100))
+        daily_mon = PositiveInt(random.randint(100, 1000) if random.random() < 0.01 else random.randint(20, 50))
 
         new_balance = await self.bot.user_db.mint_currency(
             user_id=UserId(ctx.author.id),

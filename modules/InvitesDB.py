@@ -39,8 +39,8 @@ class InvitesDB:
             await conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS invites (
-                    invitee_id INTEGER NOT NULL CHECK(invitee_id > 1000000),
-                    guild_id INTEGER NOT NULL CHECK(guild_id > 1000000),
+                    invitee_id INTEGER NOT NULL CHECK(invitee_id > 1000000 AND invitee_id < 10000000000000000000),
+                    guild_id INTEGER NOT NULL CHECK(guild_id > 1000000 AND guild_id < 10000000000000000000),
                     inviter_id INTEGER, -- Can be NULL if inviter is unknown
                     joined_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S', 'now')),
                     PRIMARY KEY (invitee_id, guild_id),
@@ -91,53 +91,30 @@ class InvitesDB:
             await conn.commit()
             return cursor.rowcount == 1
 
-    async def sync_invite(
-        self,
-        invitee_id: UserId,
-        inviter_id: InviterId,
-        guild_id: GuildId,
-        joined_at: str | None,
-    ) -> bool:
-        """Insert a new invite record or update an existing one.
+    async def bulk_sync_invites(self, member_data: list[tuple[UserId, InviterId, GuildId, str | None]]) -> int:
+        """Insert or update multiple invite records in a single transaction.
 
         This is used by the sync command to correct data from the API.
-        Returns True if a row was inserted or updated, False otherwise.
+        Returns the number of rows affected.
         """
-        if invitee_id == inviter_id:
-            return False  # Ignore self-invites
-
+        sql = """
+            INSERT INTO invites (invitee_id, guild_id, inviter_id, joined_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(invitee_id, guild_id) DO UPDATE SET
+                inviter_id = excluded.inviter_id,
+                joined_at = COALESCE(excluded.joined_at, invites.joined_at)
+            WHERE
+                invites.inviter_id IS NOT excluded.inviter_id OR
+                (excluded.joined_at IS NOT NULL AND invites.joined_at IS NOT excluded.joined_at);
+        """
         async with self.database.get_conn() as conn:
-            # We must provide a join date. If the API gives none,
-            # we let the database use its default.
-            if joined_at:
-                sql = """
-                    INSERT INTO invites (invitee_id, guild_id, inviter_id, joined_at)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(invitee_id, guild_id) DO UPDATE SET
-                        inviter_id = excluded.inviter_id,
-                        joined_at = excluded.joined_at
-                    WHERE
-                        -- Only update if data is actually different
-                        invites.inviter_id IS NOT excluded.inviter_id OR
-                        invites.joined_at IS NOT excluded.joined_at;
-                """
-                params: tuple[int | str | None, ...] = (invitee_id, guild_id, inviter_id, joined_at)
-            else:
-                # API didn't provide a join date, just update inviter
-                sql = """
-                    INSERT INTO invites (invitee_id, guild_id, inviter_id)
-                    VALUES (?, ?, ?)
-                    ON CONFLICT(invitee_id, guild_id) DO UPDATE SET
-                        inviter_id = excluded.inviter_id
-                    WHERE
-                        invites.inviter_id IS NOT excluded.inviter_id;
-                """
-                params = (invitee_id, guild_id, inviter_id)
-
-            cursor = await conn.execute(sql, params)
+            # Filter out self-invites before executing
+            valid_member_data = [
+                (invitee, guild, inviter, joined) for invitee, inviter, guild, joined in member_data if invitee != inviter
+            ]
+            cursor = await conn.executemany(sql, valid_member_data)
             await conn.commit()
-            # rowcount will be > 0 for a successful INSERT or UPDATE
-            return cursor.rowcount > 0
+            return cursor.rowcount
 
     async def get_all_invitee_ids(self, guild_id: GuildId) -> set[UserId]:
         """Retrieve a set of all user IDs that have been invited in a guild."""

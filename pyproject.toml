@@ -9,7 +9,7 @@ dependencies = [
   "python-dotenv==1.1.1",
   "discord-py==2.6.3",
   "aiosqlite==0.21.0",
-  "blackjack21>=3.2.0",
+  "blackjack21>=4.0.0",
   "requests>=2.32.5",
 ]
 
@@ -50,7 +50,7 @@ preview = true
 unresolved-import = "ignore"
 
 [tool.uv.sources]
-blackjack21 = { git = "https://github.com/Restitutor/blackjack21", branch = "v4.0.0" }
+discord-py = { git = "https://github.com/Rapptz/discord.py/" }
 
 [tool.ruff.format]
 quote-style = "double"

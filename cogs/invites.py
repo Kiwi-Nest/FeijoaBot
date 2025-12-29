@@ -208,7 +208,7 @@ class InvitesCog(GuildOnlyHybridCog):
             await interaction.followup.send("Could not fetch any members from the Discord API.")
             return
 
-        rows_affected = 0
+        member_data_list = []
         for member_data in all_members:
             inviter_id_str = member_data.get("inviter_id")
             # We still process members without an inviter_id to update their joined_at
@@ -230,9 +230,9 @@ class InvitesCog(GuildOnlyHybridCog):
                     log.warning("Could not parse joined_at timestamp: %s", joined_at_str)
                     joined_at_db = None  # Let the DB handle it
 
-            if await self.bot.invites_db.sync_invite(invitee_id, inviter_id, guild_id, joined_at_db):
-                rows_affected += 1
+            member_data_list.append((invitee_id, inviter_id, guild_id, joined_at_db))
 
+        rows_affected = await self.bot.invites_db.bulk_sync_invites(member_data_list)
         await interaction.followup.send(f"Sync complete. {rows_affected} records were created or updated.")
 
 

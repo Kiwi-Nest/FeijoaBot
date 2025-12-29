@@ -23,6 +23,7 @@ class BotConfig:
     game_admin_log_channel_id: ChannelId | None
     servers_path: Path | None
     twelvedata_api_key: str | None
+    libretranslate_host: str | None
 
     @classmethod
     def from_environment(cls) -> Self:
@@ -74,4 +75,5 @@ class BotConfig:
             ),
             servers_path=get_path("SERVERS_PATH"),
             twelvedata_api_key=os.getenv("TWELVEDATA_API_KEY"),
+            libretranslate_host=os.getenv("LIBRETRANSLATE_HOST", "http://localhost:5000"),
         )

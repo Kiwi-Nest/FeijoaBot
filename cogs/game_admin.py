@@ -1,4 +1,5 @@
 import logging
+import re
 
 import discord
 from discord import app_commands
@@ -262,9 +263,13 @@ class GameAdmin(
         reason: str | None = None,
     ) -> None:
         """Send an RCON command to an online server."""
-        await interaction.response.defer()
-        # No 'if not self.manager' check needed here.
+        # Whitelist for safe RCON commands. Allows alphanumeric, space, and _, ., -, /, #, "
+        # Admins aren't expected to use anything else.
+        if not re.match(r"^[a-zA-Z0-9_.\- /#\"]+$", command):
+            await interaction.response.send_message("❌ Error: Command contains invalid characters.", ephemeral=True)
+            return
 
+        await interaction.response.defer()
         response = await self.manager.run_rcon(server, command)
 
         response_content = response.strip() if response else "No response from server."
