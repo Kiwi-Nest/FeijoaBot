@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import discord
 from discord import app_commands
@@ -8,7 +8,10 @@ from discord.ext import commands
 
 from modules.dtypes import GuildId, InviterId, UserId
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.InvitesDB import InvitesDB
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -21,8 +24,9 @@ class InvitesCog(GuildOnlyHybridCog):
     # 1. Define the parent group for all invite commands
     invites = app_commands.Group(name="invites", description="Commands for invite tracking.")
 
-    def __init__(self, bot: KiwiBot) -> None:  # Removed guild_id, alert_channel_id from init
+    def __init__(self, bot: KiwiBot, invites_db: InvitesDB) -> None:  # Removed guild_id, alert_channel_id from init
         self.bot = bot
+        self.invites_db = invites_db
         self.invites: dict[GuildId, dict[str, int]] = {}  # Cache still needed for invite diffing
 
     @commands.Cog.listener()
@@ -48,6 +52,17 @@ class InvitesCog(GuildOnlyHybridCog):
                     "Bot lacks 'Manage Server' permissions to fetch invites for guild %s.",
                     guild.name,
                 )
+                self.bot.dispatch(
+                    "security_alert",
+                    guild_id=guild.id,
+                    risk_level="HIGH",
+                    details=(
+                        "**Invite Tracking Failed**\n"
+                        "I cannot track invites because I am missing the `Manage Server` permission.\n"
+                        "Invite tracking will be disabled until this is fixed."
+                    ),
+                    warning_type="invite_tracking_fail",
+                )
             except discord.HTTPException:
                 log.exception(
                     "An HTTP error occurred while fetching invites for guild %s.",
@@ -66,56 +81,69 @@ class InvitesCog(GuildOnlyHybridCog):
         if member.bot:
             return
 
-        inviter = None
+        inviter_id: InviterId = None
+
         try:
-            guild_invites = self.invites.get(member.guild.id, {})
-            current_invites = await member.guild.invites()
-            # Compare current invites with the cached invites to find the one that was used
-            for invite in current_invites:
-                if invite.uses is not None and (
-                    invite.code not in guild_invites or invite.uses > guild_invites.get(invite.code, 0)
-                ):
-                    inviter = invite.inviter
-                    break  # Found the invite, stop searching.
+            inviter = None
+            try:
+                guild_invites = self.invites.get(member.guild.id, {})
+                current_invites = await member.guild.invites()
+                # Compare current invites with the cached invites to find the one that was used
+                for invite in current_invites:
+                    if invite.uses is not None and (
+                        invite.code not in guild_invites or invite.uses > guild_invites.get(invite.code, 0)
+                    ):
+                        inviter = invite.inviter
+                        break  # Found the invite, stop searching.
 
-            # Update the cache with the new uses
-            self.invites[member.guild.id] = {invite.code: invite.uses for invite in current_invites if invite.uses is not None}
+                # Update the cache with the new uses
+                self.invites[member.guild.id] = {
+                    invite.code: invite.uses for invite in current_invites if invite.uses is not None
+                }
 
-        except discord.Forbidden:
-            log.warning("Missing 'Manage Server' permissions for guild %d.", member.guild.id)
-            await self.bot.log_admin_warning(
-                guild_id=GuildId(member.guild.id),
-                warning_type="invite_permission",
-                description=(
-                    "I am missing the `Manage Server` permission. "
-                    "I cannot track who is inviting new members until this is granted."
-                ),
-                level="WARN",
+            except discord.Forbidden:
+                log.warning("Missing 'Manage Server' permissions for guild %d.", member.guild.id)
+                self.bot.dispatch(
+                    "security_alert",
+                    guild_id=member.guild.id,
+                    risk_level="MEDIUM",
+                    details=(
+                        "**Invite Permission Missing**\n"
+                        "I am missing the `Manage Server` permission. "
+                        "I cannot track who is inviting new members until this is granted."
+                    ),
+                    warning_type="invite_permission",
+                )
+            except discord.HTTPException:
+                log.exception("HTTP error fetching invites.")
+                self.bot.dispatch(
+                    "security_alert",
+                    guild_id=member.guild.id,
+                    risk_level="HIGH",
+                    details=(
+                        f"**Invite API Error**\n"
+                        f"An API error occurred while trying to find the inviter for {member.mention}. "
+                        "This is likely a temporary Discord issue."
+                    ),
+                    warning_type="invite_api_fail",
+                )
+
+            # Determine the inviter's ID, defaulting to None if not found.
+            inviter_id = UserId(inviter.id) if inviter else None
+
+            # This cog's only job is to find the inviter and save it.
+            # The JoinLeaveLogCog will handle all logging.
+            await self.invites_db.insert_invite(
+                UserId(member.id),
+                inviter_id,
+                GuildId(member.guild.id),
             )
-            return
-        except discord.HTTPException:
-            log.exception("HTTP error fetching invites.")
-            await self.bot.log_admin_warning(
-                guild_id=GuildId(member.guild.id),
-                warning_type="invite_api_fail",
-                description=(
-                    f"An API error occurred while trying to find the inviter for {member.mention}. "
-                    "This is likely a temporary Discord issue."
-                ),
-                level="ERROR",
-            )
-            return
+        except Exception:
+            log.exception("Critical error during invite tracking")
+            # Ensure we don't crash before dispatching
 
-        # Determine the inviter's ID, defaulting to None if not found.
-        inviter_id: InviterId = UserId(inviter.id) if inviter else None
-
-        # This cog's only job is to find the inviter and save it.
-        # The JoinLeaveLogCog will handle all logging.
-        await self.bot.invites_db.insert_invite(
-            UserId(member.id),
-            inviter_id,
-            GuildId(member.guild.id),
-        )
+        # This ALWAYS happens now, guaranteeing the join log appears
+        self.bot.dispatch("invite_recorded", member, inviter_id)
 
     @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite) -> None:
@@ -144,7 +172,7 @@ class InvitesCog(GuildOnlyHybridCog):
         """Display the top 10 inviters in an embed."""
         await interaction.response.defer()
         # This new method returns a sorted list of (user_id, invite_count) tuples
-        leaderboard_data = await self.bot.invites_db.get_invite_leaderboard(GuildId(interaction.guild.id))
+        leaderboard_data = await self.invites_db.get_invite_leaderboard(GuildId(interaction.guild.id))
 
         embed = discord.Embed(title="🏆 Top Invites Leaderboard", color=discord.Color.gold())
 
@@ -168,7 +196,7 @@ class InvitesCog(GuildOnlyHybridCog):
     async def invites_mylist(self, interaction: discord.Interaction) -> None:
         """Show a list of members invited by the user."""
         await interaction.response.defer(ephemeral=True)
-        all_invites = await self.bot.invites_db.get_invites_by_inviter(GuildId(interaction.guild.id))
+        all_invites = await self.invites_db.get_invites_by_inviter(GuildId(interaction.guild.id))
         user_invites = all_invites.get(UserId(interaction.user.id), [])
 
         embed = discord.Embed(title="Your Invited Members", color=discord.Color.purple())
@@ -198,7 +226,7 @@ class InvitesCog(GuildOnlyHybridCog):
 
         try:
             guild_id = GuildId(interaction.guild.id)
-            all_members = await self.bot.invites_db.get_all_guild_members_api(guild_id)
+            all_members = await self.invites_db.get_all_guild_members_api(guild_id)
         except Exception:
             log.exception("Error during invites sync preparation.")
             await interaction.followup.send("An error occurred during preparation")
@@ -232,11 +260,11 @@ class InvitesCog(GuildOnlyHybridCog):
 
             member_data_list.append((invitee_id, inviter_id, guild_id, joined_at_db))
 
-        rows_affected = await self.bot.invites_db.bulk_sync_invites(member_data_list)
+        rows_affected = await self.invites_db.bulk_sync_invites(member_data_list)
         await interaction.followup.send(f"Sync complete. {rows_affected} records were created or updated.")
 
 
 async def setup(bot: KiwiBot) -> None:
     """Entry point for loading the cog."""
     # InvitesCog is now stateless and will fetch config per guild.
-    await bot.add_cog(InvitesCog(bot))
+    await bot.add_cog(InvitesCog(bot=bot, invites_db=bot.invites_db))

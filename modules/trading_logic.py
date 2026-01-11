@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 from modules.aio_twelvedata import AioTwelveDataClient, AioTwelveDataError, AioTwelveDataRequestError, Ticker
 from modules.CurrencyLedgerDB import COLLATERAL_POOL_ID, SYSTEM_USER_ID
 from modules.enums import StatName
+from modules.exceptions import UserError
 
 # --- Logging ---
 log = logging.getLogger(__name__)
@@ -254,15 +255,17 @@ class PriceCache:
 
 
 # --- Custom Exceptions (can be shared or defined here) ---
-class InsufficientFundsError(Exception):
+
+
+class InsufficientFundsError(UserError):
     """Raised when a user doesn't have enough cash for a transaction."""
 
 
-class PortfolioNotFoundError(Exception):
+class PortfolioNotFoundError(UserError):
     """Raised when a user's portfolio doesn't exist yet."""
 
 
-class PriceNotAvailableError(Exception):
+class PriceNotAvailableError(UserError):
     """Raised when a known ticker's price is not in the cache (e.g., pending update)."""
 
 
@@ -361,8 +364,8 @@ class TradingLogic:
         guild_id: GuildId,
         ticker: Ticker,
         trade_type: Literal["BUY", "SHORT"],  # Literal for specific string values
-        dollar_amount: PositiveInt,  # This is now a PositiveInt
-        leverage: PositiveInt = 1,
+        dollar_amount: PositiveInt,
+        leverage: PositiveInt,
     ) -> tuple[float, int, str, datetime.datetime, bool, int]:
         """Open a new long or short position (a new 'lot').
 

@@ -15,13 +15,15 @@ from discord.ext import commands
 
 from modules.dtypes import GuildId, PositiveInt, UserId
 from modules.enums import StatName
+from modules.exceptions import UserError
 from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
     from discord import Interaction
 
-    from modules.CurrencyLedgerDB import EventReason
+    from modules.CurrencyLedgerDB import CurrencyLedgerDB, EventReason
     from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 SECOND_COOLDOWN: Final[int] = 1
 
@@ -85,9 +87,14 @@ class BlackjackView(discord.ui.View):
         bot: KiwiBot,
         user: discord.User | discord.Member,
         bet: int,
+        *,
+        user_db: UserDB,
+        ledger_db: CurrencyLedgerDB,
     ) -> None:
         super().__init__(timeout=self.GAME_TIMEOUT)
         self.bot = bot
+        self.user_db = user_db
+        self.ledger_db = ledger_db
         self.user = user
         self.initial_bet = bet
         self.last_action: str | None = None
@@ -184,27 +191,25 @@ class BlackjackView(discord.ui.View):
             # Fallback, though this shouldn't be hit
             reason = "BLACKJACK_BET"
 
-        new_balance = await self.bot.user_db.burn_currency(
+        new_balance = await self.user_db.burn_currency(
             user_id=user_id,
             guild_id=guild_id,
             amount=PositiveInt(amount),
             event_reason=reason,
-            ledger_db=self.bot.ledger_db,
+            ledger_db=self.ledger_db,
             initiator_id=user_id,
         )
 
         if new_balance is None:
             # Get the balance *after* the failed burn for the error message
-            balance = await self.bot.user_db.get_stat(
+            balance = await self.user_db.get_stat(
                 user_id,
                 guild_id,
                 StatName.CURRENCY,
             )
-            await interaction.response.send_message(
-                f"You don't have enough credits to {action_name}. You need ${amount:,} but only have ${balance:,}.",
-                ephemeral=True,
-            )
-            return False
+
+            msg = f"You don't have enough credits to {action_name}. You need ${amount:,} but only have ${balance:,}."
+            raise UserError(msg)
 
         return True
 
@@ -223,7 +228,7 @@ class BlackjackView(discord.ui.View):
         guild_id = GuildId(self.user.guild.id)
         user_id = UserId(self.user.id)
 
-        stats = self.bot.blackjack_stats[guild_id][user_id]  # This will now work automatically
+        stats = blackjack_stats[guild_id][user_id]  # This will now work automatically
 
         stats[config["stat"]] += 1
         stats["net_credits"] += int(bet_amount * config["net_mult"])
@@ -233,12 +238,12 @@ class BlackjackView(discord.ui.View):
         payout_reason = config.get("reason")  # Get the new reason from our config
 
         if payout > 0 and payout_reason:
-            await self.bot.user_db.mint_currency(
+            await self.user_db.mint_currency(
                 user_id=user_id,
                 guild_id=guild_id,
                 amount=PositiveInt(payout),
                 event_reason=payout_reason,
-                ledger_db=self.bot.ledger_db,
+                ledger_db=self.ledger_db,
                 initiator_id=user_id,
             )
 
@@ -388,11 +393,14 @@ class HitButton(discord.ui.Button["BlackjackView"]):
     async def callback(self, interaction: Interaction) -> None:
         view = self.view
 
+        # Capture the current hand before the action
+        current_hand = view.table.current_hand
+
         try:
             card = view.table.hit()
             view.last_action = f"You hit and drew a {card}."
 
-            if view.table.current_hand and view.table.current_hand.bust:
+            if current_hand and current_hand.bust:
                 view.last_action += " You busted!"
 
         except (PlayFailure, InvalidActionError) as e:
@@ -456,9 +464,12 @@ class DoubleDownButton(discord.ui.Button["BlackjackView"]):
         ):
             return
 
+        # Capture the current hand before the action
+        current_hand = view.table.current_hand
+
         try:
             card = view.table.double_down()
-            view.last_action = f"You doubled down and drew a {card}. Final total: {view.table.current_hand.total}."
+            view.last_action = f"You doubled down and drew a {card}. Final total: {current_hand.total}."
         except (PlayFailure, InvalidActionError) as e:
             await interaction.response.send_message(f"Error: {e}", ephemeral=True)
             return
@@ -542,17 +553,17 @@ class PlayAgainButton(discord.ui.Button["BlackjackView"]):
         view = self.view
         user_id = UserId(interaction.user.id)
         guild_id = GuildId(interaction.guild.id)
-        new_balance = await view.bot.user_db.burn_currency(
+        new_balance = await view.user_db.burn_currency(
             user_id=user_id,
             guild_id=guild_id,
             amount=PositiveInt(self.bet),
             event_reason="BLACKJACK_BET",
-            ledger_db=view.bot.ledger_db,
+            ledger_db=view.ledger_db,
             initiator_id=user_id,
         )
 
         if new_balance is None:
-            balance = await view.bot.user_db.get_stat(
+            balance = await view.user_db.get_stat(
                 user_id,
                 guild_id,
                 StatName.CURRENCY,
@@ -618,24 +629,28 @@ def format_hand(hand: list[Card]) -> str:
     return " ".join(format_card(c) for c in hand) if hand else "`Empty`"
 
 
+# This factory creates a default stat dict for a new user
+def user_stats_factory() -> dict[str, int]:
+    return {
+        "wins": 0,
+        "losses": 0,
+        "pushes": 0,
+        "blackjacks": 0,
+        "net_credits": 0,
+    }
+
+
+# Initialize as a nested defaultdict
+blackjack_stats: defaultdict[int, defaultdict[int, dict[str, int]]] = defaultdict(
+    lambda: defaultdict(user_stats_factory),
+)
+
+
 class BlackjackCog(GuildOnlyHybridCog):
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, *, user_db: UserDB, ledger_db: CurrencyLedgerDB) -> None:
         self.bot = bot
-
-        # This factory creates a default stat dict for a new user
-        def user_stats_factory() -> dict[str, int]:
-            return {
-                "wins": 0,
-                "losses": 0,
-                "pushes": 0,
-                "blackjacks": 0,
-                "net_credits": 0,
-            }
-
-        # Initialize as a nested defaultdict
-        self.bot.blackjack_stats: defaultdict[int, defaultdict[int, dict[str, int]]] = defaultdict(
-            lambda: defaultdict(user_stats_factory),
-        )
+        self.user_db = user_db
+        self.ledger_db = ledger_db
 
     @commands.hybrid_command(
         name="blackjack",
@@ -646,21 +661,21 @@ class BlackjackCog(GuildOnlyHybridCog):
     async def blackjack(
         self,
         ctx: commands.Context,
-        bet: commands.Range[int, 1],  # ty: ignore [invalid-type-form]
-    ) -> None:  # ty: ignore [invalid-type-form]
+        bet: commands.Range[int, 1],
+    ) -> None:
         user_id = UserId(ctx.author.id)
         guild_id = GuildId(ctx.guild.id)
-        new_balance = await self.bot.user_db.burn_currency(
+        new_balance = await self.user_db.burn_currency(
             user_id=user_id,
             guild_id=guild_id,
             amount=PositiveInt(bet),
             event_reason="BLACKJACK_BET",
-            ledger_db=self.bot.ledger_db,
+            ledger_db=self.ledger_db,
             initiator_id=user_id,
         )
 
         if new_balance is None:
-            balance = await self.bot.user_db.get_stat(
+            balance = await self.user_db.get_stat(
                 user_id,
                 guild_id,
                 StatName.CURRENCY,
@@ -671,7 +686,13 @@ class BlackjackCog(GuildOnlyHybridCog):
             )
             return
 
-        view = BlackjackView(self.bot, ctx.author, bet)
+        view = BlackjackView(
+            self.bot,
+            ctx.author,
+            bet,
+            user_db=self.user_db,
+            ledger_db=self.ledger_db,
+        )
         await ctx.send(embed=view.create_embed(), view=view, ephemeral=False)
 
     @commands.hybrid_command(
@@ -680,7 +701,7 @@ class BlackjackCog(GuildOnlyHybridCog):
     )
     @commands.cooldown(1, SECOND_COOLDOWN * 10, commands.BucketType.user)
     async def blackjack_stats(self, ctx: commands.Context) -> None:
-        stats = self.bot.blackjack_stats.get(ctx.guild.id, {}).get(ctx.author.id)
+        stats = blackjack_stats.get(ctx.guild.id, {}).get(ctx.author.id)
         if not stats:
             await ctx.send("You haven't played any games yet!", ephemeral=True)
             return
@@ -707,7 +728,7 @@ class BlackjackCog(GuildOnlyHybridCog):
     )
     @commands.cooldown(1, SECOND_COOLDOWN * 10, commands.BucketType.user)
     async def blackjack_leaderboard(self, ctx: commands.Context) -> None:
-        guild_stats = self.bot.blackjack_stats.get(ctx.guild.id)
+        guild_stats = blackjack_stats.get(ctx.guild.id)
         if not guild_stats:
             await ctx.send(
                 "No one has played any games on this server yet!",
@@ -736,4 +757,4 @@ class BlackjackCog(GuildOnlyHybridCog):
 
 
 async def setup(bot: KiwiBot) -> None:
-    await bot.add_cog(BlackjackCog(bot))
+    await bot.add_cog(BlackjackCog(bot, user_db=bot.user_db, ledger_db=bot.ledger_db))

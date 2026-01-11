@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 
 if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
     from modules.KiwiBot import KiwiBot
 
 from modules.dtypes import GuildId, is_guild_message
@@ -17,8 +18,9 @@ log = logging.getLogger(__name__)
 class ForwardCog(commands.Cog):
     """Cog for forwarding messages from a specific source."""
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, config_db: ConfigDB) -> None:
         self.bot = bot
+        self.config_db = config_db
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -28,7 +30,7 @@ class ForwardCog(commands.Cog):
             return
 
         # 2. Get the guild-specific configuration
-        config = await self.bot.config_db.get_guild_config(GuildId(message.guild.id))
+        config = await self.config_db.get_guild_config(GuildId(message.guild.id))
 
         # 3. Check if this guild has forwarding enabled
         if not config.qotd_source_bot_id or not config.qotd_target_channel_id:
@@ -49,14 +51,16 @@ class ForwardCog(commands.Cog):
                         config.qotd_target_channel_id,
                         message.guild.id,
                     )
-                    await self.bot.log_admin_warning(
-                        guild_id=GuildId(message.guild.id),
-                        warning_type="forwarder_channel_missing",
-                        description=(
+                    self.bot.dispatch(
+                        "security_alert",
+                        guild_id=message.guild.id,
+                        risk_level="HIGH",
+                        details=(
+                            f"**Message Forwarder Failed**\n"
                             f"The message forwarder failed because the target channel (`{config.qotd_target_channel_id}`) "
                             "could not be found. It may have been deleted."
                         ),
-                        level="ERROR",
+                        warning_type="forwarder_channel_missing",
                     )
                     return
 
@@ -69,17 +73,19 @@ class ForwardCog(commands.Cog):
                     target_channel.id,
                     message.guild.id,
                 )
-                await self.bot.log_admin_warning(
-                    guild_id=GuildId(message.guild.id),
-                    warning_type="forwarder_permission",
-                    description=(
+                self.bot.dispatch(
+                    "security_alert",
+                    guild_id=message.guild.id,
+                    risk_level="HIGH",
+                    details=(
+                        f"**Message Forwarder Permission Error**\n"
                         f"I failed to forward an embed to {target_channel.mention} because I am "
                         "missing the `Send Messages` or `Embed Links` permission in that channel."
                     ),
-                    level="ERROR",
+                    warning_type="forwarder_permission",
                 )
 
 
 async def setup(bot: KiwiBot) -> None:
     """Add the ForwardCog to the bot."""
-    await bot.add_cog(ForwardCog(bot))
+    await bot.add_cog(ForwardCog(bot=bot, config_db=bot.config_db))

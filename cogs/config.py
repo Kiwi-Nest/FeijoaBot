@@ -1,13 +1,16 @@
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules.dtypes import GuildId, UserId
-from modules.KiwiBot import KiwiBot
-from modules.security_utils import SecurityCheckError, validate_bot_hierarchy, validate_role_safety
+from modules.dtypes import GuildId, GuildInteraction, UserId
+from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_role_safety, ensure_verifiable_role
+
+if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -39,15 +42,18 @@ class AutodiscoverView(discord.ui.View):
         bot: KiwiBot,
         author_id: UserId,
         suggestions: dict[str, int],
+        *,
+        config_db: ConfigDB,
     ) -> None:
         super().__init__(timeout=180)
         self.bot = bot
+        self.config_db = config_db
         self.author_id = author_id
         self.suggestions = suggestions
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """Ensure only the command author can interact."""
-        if interaction.user.id != self.author_id:
+        if interaction.user.id != self.author_id or not interaction.guild_id:
             await interaction.response.send_message(
                 "This isn't your confirmation menu.",
                 ephemeral=True,
@@ -62,7 +68,7 @@ class AutodiscoverView(discord.ui.View):
     )
     async def save_button(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         _button: discord.ui.Button,
     ) -> None:
         """Save the discovered settings to the database."""
@@ -73,7 +79,7 @@ class AutodiscoverView(discord.ui.View):
         saved_count = 0
         for setting, value in self.suggestions.items():
             if value is not None:
-                await self.bot.config_db.set_setting(guild_id, setting, value)
+                await self.config_db.set_setting(guild_id, setting, value)
                 saved_count += 1
 
         for child in self.children:
@@ -87,7 +93,7 @@ class AutodiscoverView(discord.ui.View):
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
     async def cancel_button(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         _button: discord.ui.Button,
     ) -> None:
         """Cancel the operation and disable the view."""
@@ -166,20 +172,56 @@ class Config(
 ):
     """A cog for guild-specific configuration with slash commands."""
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
         self.bot = bot
+        self.config_db = config_db
         super().__init__()
+
+    async def on_app_command_error(
+        self,
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        """Handle errors for all commands in this Cog."""
+        # Unwrap CommandInvokeError if present
+        original_error = error.original if isinstance(error, app_commands.CommandInvokeError) else error
+
+        if isinstance(original_error, SecurityCheckError):
+            await interaction.response.send_message(
+                f"❌ **Configuration Blocked:**\n{original_error}",
+                ephemeral=True,
+            )
+        elif isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                f"❌ You do not have the required permissions: {', '.join(error.missing_permissions)}",
+                ephemeral=True,
+            )
+        elif isinstance(error, app_commands.BotMissingPermissions):
+            await interaction.response.send_message(
+                f"❌ I do not have the required permissions: {', '.join(error.missing_permissions)}",
+                ephemeral=True,
+            )
+        elif isinstance(error, app_commands.AppCommandError):
+            # Generic AppCommandError (e.g., from transformers or validators)
+            await interaction.response.send_message(str(error), ephemeral=True)
+        else:
+            log.exception("Unhandled error in Config cog: %s", error)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ An unexpected error occurred.",
+                    ephemeral=True,
+                )
 
     @app_commands.command(
         name="view",
         description="Display the current bot configuration for this server.",
     )
-    async def view_config(self, interaction: discord.Interaction) -> None:
+    async def view_config(self, interaction: GuildInteraction) -> None:
         """Display the current configuration in an embed."""
         if not interaction.guild:
             return  # Should be unreachable due to guild_only
 
-        config = await self.bot.config_db.get_guild_config(
+        config = await self.config_db.get_guild_config(
             GuildId(interaction.guild.id),
         )
 
@@ -282,7 +324,7 @@ class Config(
     )
     async def set_channel(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         feature: app_commands.Choice[str],  # ChannelSetting
         channel: discord.TextChannel | discord.VoiceChannel | None = None,
     ) -> None:
@@ -291,7 +333,7 @@ class Config(
             return
 
         value = channel.id if channel else None
-        await self.bot.config_db.set_setting(
+        await self.config_db.set_setting(
             GuildId(interaction.guild_id),
             feature.value,
             value,
@@ -329,7 +371,7 @@ class Config(
     )
     async def set_role(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         feature: app_commands.Choice[str],  # RoleSetting
         role: discord.Role | None = None,
     ) -> None:
@@ -347,21 +389,15 @@ class Config(
             ]
             require_no_perms = feature.value in cosmetic_features
 
-            try:
-                # Run our centralized security checks
-                validate_role_safety(role, require_no_permissions=require_no_perms)
-                validate_bot_hierarchy(interaction, role)
-
-            except SecurityCheckError as e:
-                # Catch a failed check and report it to the admin
-                await interaction.response.send_message(
-                    f"❌ **Configuration Blocked:**\n{e}",
-                    ephemeral=True,
-                )
-                return
+            # Run our centralized security checks (raises SecurityCheckError on failure)
+            if require_no_perms:
+                ensure_role_safety(role)
+            else:
+                ensure_verifiable_role(role)
+            ensure_bot_hierarchy(interaction, role)
 
         value = role.id if role else None
-        await self.bot.config_db.set_setting(
+        await self.config_db.set_setting(
             GuildId(interaction.guild_id),
             feature.value,
             value,
@@ -382,7 +418,7 @@ class Config(
         name="autodiscover",
         description="Automatically discover and suggest settings.",
     )
-    async def autodiscover(self, interaction: discord.Interaction) -> None:
+    async def autodiscover(self, interaction: GuildInteraction) -> None:
         """Scan the server and suggest settings based on channel and role names."""
         if not interaction.guild:
             return
@@ -417,10 +453,28 @@ class Config(
         )
         view = AutodiscoverView(
             self.bot,
-            interaction.user.id,
+            UserId(interaction.user.id),
             {k: v for k, v in suggestions.items() if v is not None},
+            config_db=self.config_db,
         )
         await interaction.followup.send(embed=embed, view=view)
+
+    @app_commands.command(name="language", description="Set the server's default language.")
+    @app_commands.choices(
+        lang=[
+            app_commands.Choice(name="English 🇬🇧", value="en"),
+            app_commands.Choice(name="Romanian 🇷🇴", value="ro"),
+        ],
+    )
+    async def set_server_language(self, interaction: GuildInteraction, lang: str) -> None:
+        """Set the default language for the server."""
+        if not interaction.guild_id:
+            return
+
+        await self.config_db.set_setting(GuildId(interaction.guild.id), "default_language", lang)
+
+        # Friendly response with flag if possible, though simple bold text is fine as per spec
+        await interaction.response.send_message(f"✅ Server language set to **{lang}**.")
 
     # --- Sub-group for Forwarding Config ---
     forward = app_commands.Group(
@@ -437,7 +491,7 @@ class Config(
     )
     async def set_forward_source(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         bot: discord.User,
     ) -> None:
         """Set the source bot for forwarding."""
@@ -451,7 +505,7 @@ class Config(
             )
             return
 
-        await self.bot.config_db.set_setting(
+        await self.config_db.set_setting(
             GuildId(interaction.guild_id),
             "qotd_source_bot_id",
             bot.id,
@@ -470,14 +524,14 @@ class Config(
     )
     async def set_forward_target(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         channel: discord.TextChannel,
     ) -> None:
         """Set the target channel for forwarding."""
         if not interaction.guild_id:
             return
 
-        await self.bot.config_db.set_setting(
+        await self.config_db.set_setting(
             GuildId(interaction.guild_id),
             "qotd_target_channel_id",
             channel.id,
@@ -491,14 +545,14 @@ class Config(
         name="disable",
         description="Disable the message forwarder for this server.",
     )
-    async def disable_forwarder(self, interaction: discord.Interaction) -> None:
+    async def disable_forwarder(self, interaction: GuildInteraction) -> None:
         """Disable the forwarder by clearing both settings."""
-        await self.bot.config_db.set_setting(
+        await self.config_db.set_setting(
             GuildId(interaction.guild_id),
             "qotd_source_bot_id",
             None,
         )
-        await self.bot.config_db.set_setting(
+        await self.config_db.set_setting(
             GuildId(interaction.guild_id),
             "qotd_target_channel_id",
             None,
@@ -521,14 +575,14 @@ class Config(
     @app_commands.describe(days="Number of days (e.g., 14). Must be greater than 0.")
     async def set_prune_days(
         self,
-        interaction: discord.Interaction,
-        days: app_commands.Range[int, 1],  # ty: ignore [invalid-type-form]
-    ) -> None:  # ty: ignore [invalid-type-form]
+        interaction: GuildInteraction,
+        days: app_commands.Range[int, 1],
+    ) -> None:
         """Set the inactivity period for pruning."""
         if not interaction.guild_id:
             return
 
-        await self.bot.config_db.set_setting(
+        await self.config_db.set_setting(
             GuildId(interaction.guild_id),
             "inactivity_days",
             days,
@@ -545,23 +599,19 @@ class Config(
     @app_commands.describe(role="The (cosmetic) role to add to the prune list.")
     async def add_prune_role(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         role: discord.Role,
     ) -> None:
         """Add a role to the prune list."""
         if not interaction.guild_id:
             return
 
-        try:
-            # Prunable roles must be cosmetic and manageable
-            validate_role_safety(role, require_no_permissions=True)
-            validate_bot_hierarchy(interaction, role)
-        except SecurityCheckError as e:
-            await interaction.response.send_message(f"❌ **Configuration Blocked:**\n{e}", ephemeral=True)
-            return
+        # Prunable roles must be cosmetic and manageable (raises SecurityCheckError on failure)
+        ensure_role_safety(role)
+        ensure_bot_hierarchy(interaction, role)
 
         guild_id = GuildId(interaction.guild_id)
-        config = await self.bot.config_db.get_guild_config(guild_id)
+        config = await self.config_db.get_guild_config(guild_id)
         current_roles = config.roles_to_prune or []
 
         if role.id in current_roles:
@@ -572,7 +622,7 @@ class Config(
             return
 
         current_roles.append(role.id)
-        await self.bot.config_db.set_setting(guild_id, "roles_to_prune", current_roles)
+        await self.config_db.set_setting(guild_id, "roles_to_prune", current_roles)
         await interaction.response.send_message(
             f"✅ The role {role.mention} will now be pruned from inactive members.",
             ephemeral=True,
@@ -582,7 +632,7 @@ class Config(
     @app_commands.describe(role="The role to remove from the prune list.")
     async def remove_prune_role(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         role: discord.Role,
     ) -> None:
         """Remove a role from the prune list."""
@@ -590,7 +640,7 @@ class Config(
             return
 
         guild_id = GuildId(interaction.guild_id)
-        config = await self.bot.config_db.get_guild_config(guild_id)
+        config = await self.config_db.get_guild_config(guild_id)
         current_roles = config.roles_to_prune or []
 
         if role.id not in current_roles:
@@ -601,7 +651,7 @@ class Config(
             return
 
         current_roles.remove(role.id)
-        await self.bot.config_db.set_setting(guild_id, "roles_to_prune", current_roles)
+        await self.config_db.set_setting(guild_id, "roles_to_prune", current_roles)
         await interaction.response.send_message(
             f"✅ The role {role.mention} will no longer be pruned from inactive members.",
             ephemeral=True,
@@ -610,4 +660,4 @@ class Config(
 
 async def setup(bot: KiwiBot) -> None:
     """Add the Config cog to the bot."""
-    await bot.add_cog(Config(bot))
+    await bot.add_cog(Config(bot, config_db=bot.config_db))

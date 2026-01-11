@@ -9,7 +9,6 @@ import datetime
 import logging
 import random
 import time
-from collections.abc import Iterable
 from typing import TYPE_CHECKING, override
 from zoneinfo import ZoneInfo
 
@@ -21,7 +20,12 @@ from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
     # This avoids circular imports while providing type hints for the bot class
+    from collections.abc import Iterable
+
+    from modules.CurrencyLedgerDB import CurrencyLedgerDB
     from modules.KiwiBot import KiwiBot
+    from modules.TaskDB import TaskDB
+    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +41,8 @@ class DailyView(discord.ui.View):
 
     def __init__(
         self,
-        bot: "KiwiBot",
+        bot: KiwiBot,
+        user_db: UserDB,
         owner_id: UserId,
         daily_mon: int,
         new_balance: int,
@@ -46,6 +51,7 @@ class DailyView(discord.ui.View):
     ) -> None:
         super().__init__(timeout=180)
         self.bot = bot
+        self.user_db = user_db
         self.owner_id = owner_id
         self.daily_mon = daily_mon
         self.new_balance = new_balance
@@ -83,7 +89,7 @@ class DailyView(discord.ui.View):
             "NEVER": "Success! Reminders have been disabled.",
         }
         if interaction.guild:
-            await self.bot.user_db.set_daily_reminder_preference(self.owner_id, preference, GuildId(interaction.guild.id))
+            await self.user_db.set_daily_reminder_preference(self.owner_id, preference, GuildId(interaction.guild.id))
         await interaction.response.edit_message(view=self)
         await interaction.followup.send(messages[preference], ephemeral=True)
 
@@ -156,12 +162,22 @@ class DailyView(discord.ui.View):
 
 
 class Daily(GuildOnlyHybridCog):
-    def __init__(self, bot: "KiwiBot") -> None:
+    def __init__(
+        self,
+        bot: KiwiBot,
+        *,
+        user_db: UserDB,
+        task_db: TaskDB,
+        ledger_db: CurrencyLedgerDB,
+    ) -> None:
         self.bot = bot
+        self.user_db = user_db
+        self.task_db = task_db
+        self.ledger_db = ledger_db
         self.daily_management_task.start()
 
     @override
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self.daily_management_task.cancel()
 
@@ -172,7 +188,7 @@ class Daily(GuildOnlyHybridCog):
 
         try:
             # One atomic database call for all guilds.
-            users_to_remind = await self.bot.user_db.process_daily_reset_all()
+            users_to_remind = await self.user_db.process_daily_reset_all()
 
             if users_to_remind:
                 log.info("Preparing to send %d daily reminders.", len(users_to_remind))
@@ -186,7 +202,7 @@ class Daily(GuildOnlyHybridCog):
             next_run_time = self.daily_management_task.next_iteration
             if next_run_time:
                 log.info("Persisting next DAILY_RESET time: %s", next_run_time.isoformat())
-                await self.bot.task_db.schedule_task("DAILY_RESET", next_run_time.timestamp())
+                await self.task_db.schedule_task("DAILY_RESET", next_run_time.timestamp())
 
     @daily_management_task.before_loop
     async def before_daily_management_task(self) -> None:
@@ -194,7 +210,7 @@ class Daily(GuildOnlyHybridCog):
         await self.bot.wait_until_ready()
 
         # Check if a reset was missed while the bot was offline.
-        pending_task = await self.bot.task_db.get_pending_task("DAILY_RESET")
+        pending_task = await self.task_db.get_pending_task("DAILY_RESET")
         if pending_task:
             _task_type, due_timestamp = pending_task
             if due_timestamp - time.time() <= 0:
@@ -207,7 +223,7 @@ class Daily(GuildOnlyHybridCog):
         next_run_time = self.daily_management_task.next_iteration
         if next_run_time:
             log.info("Persisting next DAILY_RESET time: %s", next_run_time.isoformat())
-            await self.bot.task_db.schedule_task("DAILY_RESET", next_run_time.timestamp())
+            await self.task_db.schedule_task("DAILY_RESET", next_run_time.timestamp())
         else:
             log.info("Daily task loop has no missed run.")
 
@@ -243,7 +259,7 @@ class Daily(GuildOnlyHybridCog):
     @commands.hybrid_command(name="daily", description="Claim your daily currency.")
     async def daily(self, ctx: commands.Context) -> None:
         # Atomically attempt to claim the daily. If it fails, they've already claimed.
-        if not await self.bot.user_db.attempt_daily_claim(UserId(ctx.author.id), GuildId(ctx.guild.id)):
+        if not await self.user_db.attempt_daily_claim(UserId(ctx.author.id), GuildId(ctx.guild.id)):
             embed = discord.Embed(
                 title="Already Claimed",
                 description="You have already claimed your daily reward! Wait for the next reset at midnight Auckland time.",
@@ -255,12 +271,12 @@ class Daily(GuildOnlyHybridCog):
         # Simplified reward logic: 1% chance for a jackpot, 99% for a standard reward.
         daily_mon = PositiveInt(random.randint(100, 1000) if random.random() < 0.01 else random.randint(20, 50))
 
-        new_balance = await self.bot.user_db.mint_currency(
+        new_balance = await self.user_db.mint_currency(
             user_id=UserId(ctx.author.id),
             guild_id=GuildId(ctx.guild.id),
             amount=daily_mon,
             event_reason="DAILY_CLAIM",
-            ledger_db=self.bot.ledger_db,
+            ledger_db=self.ledger_db,
         )
 
         log.info(
@@ -283,6 +299,7 @@ class Daily(GuildOnlyHybridCog):
 
         view = DailyView(
             bot=self.bot,
+            user_db=self.user_db,
             owner_id=UserId(ctx.author.id),
             daily_mon=daily_mon,
             new_balance=new_balance,
@@ -293,6 +310,13 @@ class Daily(GuildOnlyHybridCog):
         await ctx.send(response_content, view=view, ephemeral=True)
 
 
-async def setup(bot: "KiwiBot") -> None:
+async def setup(bot: KiwiBot) -> None:
     """Add the Daily cog to the bot."""
-    await bot.add_cog(Daily(bot))
+    await bot.add_cog(
+        Daily(
+            bot=bot,
+            user_db=bot.user_db,
+            task_db=bot.task_db,
+            ledger_db=bot.ledger_db,
+        ),
+    )

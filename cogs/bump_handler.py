@@ -13,6 +13,8 @@ from modules.enums import StatName
 from modules.utils import format_ordinal
 
 if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
+    from modules.CurrencyLedgerDB import CurrencyLedgerDB
     from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
@@ -28,11 +30,17 @@ class BumpHandlerCog(commands.Cog):
 
     def __init__(
         self,
-        bot: "KiwiBot",
+        bot: KiwiBot,
+        *,
+        user_db: UserDB,
+        config_db: ConfigDB,
+        ledger_db: CurrencyLedgerDB,
         disboard_bot_id: UserId,
     ) -> None:
         self.bot = bot
-        self.user_db: UserDB = bot.user_db
+        self.user_db = user_db
+        self.config_db = config_db
+        self.ledger_db = ledger_db
         self.reminder_tasks: dict[GuildId, asyncio.Task | None] = {}
         self.disboard_bot_id = disboard_bot_id
 
@@ -83,7 +91,7 @@ class BumpHandlerCog(commands.Cog):
             return
 
         guild_id = GuildId(message.guild.id)
-        config = await self.bot.config_db.get_guild_config(guild_id)
+        config = await self.config_db.get_guild_config(guild_id)
         bumper_role_id = config.bumper_role_id
 
         if not bumper_role_id:
@@ -101,15 +109,15 @@ class BumpHandlerCog(commands.Cog):
                 reward = PositiveInt(random.randint(30, 50))
                 user_id = UserId(bumper.id)
                 # Reward Currency
-                await self.bot.user_db.mint_currency(
+                await self.user_db.mint_currency(
                     user_id,
                     guild_id,
                     amount=reward,
                     event_reason="BUMP_SERVER",
-                    ledger_db=self.bot.ledger_db,
+                    ledger_db=self.ledger_db,
                 )
 
-                new_bump_count = await self.bot.user_db.increment_stat(user_id, guild_id, StatName.BUMPS, PositiveInt(1))
+                new_bump_count = await self.user_db.increment_stat(user_id, guild_id, StatName.BUMPS, PositiveInt(1))
                 log.info("Rewarded %s with $%d for bumping.", bumper.display_name, reward)
                 # Ensure the channel is a TextChannel before sending
                 if not isinstance(channel, discord.TextChannel):
@@ -151,7 +159,7 @@ class BumpHandlerCog(commands.Cog):
         if delay_seconds <= 0:
             log.info("Reminder delay is zero or negative, sending now.")
             # Fetch config dynamically for immediate send
-            config = await self.bot.config_db.get_guild_config(guild_id)
+            config = await self.config_db.get_guild_config(guild_id)
             if config.bumper_role_id:
                 await self._send_reminder_message(channel, last_bumper, config.bumper_role_id)
             return
@@ -169,7 +177,7 @@ class BumpHandlerCog(commands.Cog):
                 await asyncio.sleep(delay_seconds)  # Wait for the primary reminder
 
             # Fetch config again inside the coro to ensure it's up-to-date
-            current_config = await self.bot.config_db.get_guild_config(guild_id)
+            current_config = await self.config_db.get_guild_config(guild_id)
             if current_config.bumper_role_id:
                 await self._send_reminder_message(
                     channel,
@@ -231,7 +239,20 @@ class BumpHandlerCog(commands.Cog):
                 "backup" if is_backup else "primary",
                 channel.name,
             )
-        except (discord.HTTPException, discord.Forbidden):
+        except discord.Forbidden:
+            log.warning("Forbidden to send bump reminder in %s", channel.name)
+            self.bot.dispatch(
+                "security_alert",
+                guild_id=channel.guild.id,
+                risk_level="HIGH",
+                details=(
+                    f"**Bump Reminder Failed**\n"
+                    f"I tried to send a bump reminder to {channel.mention}, but I do not have permission to speak there.\n"
+                    "Please check the channel permissions."
+                ),
+                warning_type="bump_reminder_fail",
+            )
+        except discord.HTTPException:
             log.exception(
                 "Failed to send %s reminder to %s.",
                 "backup" if is_backup else "primary",
@@ -258,18 +279,26 @@ class BumpHandlerCog(commands.Cog):
 
     def _is_successful_bump_message(self, message: discord.Message) -> bool:
         """Check if a message is a successful Disboard bump."""
-        return (
+        return bool(
             message.author.id == self.disboard_bot_id
             and message.embeds
             and message.embeds[0].description
-            and "Bump done!" in message.embeds[0].description
+            and "Bump done!" in message.embeds[0].description,
         )
 
 
-async def setup(bot: "KiwiBot") -> None:
+async def setup(bot: KiwiBot) -> None:
     """Load the cog."""
     if not bot.config.disboard_bot_id:
         log.error("BumpHandlerCog not loaded: DISBOARD_BOT_ID is not configured.")
         return
     # BumpHandlerCog is now mostly stateless, disboard_bot_id is global.
-    await bot.add_cog(BumpHandlerCog(bot, bot.config.disboard_bot_id))
+    await bot.add_cog(
+        BumpHandlerCog(
+            bot=bot,
+            user_db=bot.user_db,
+            config_db=bot.config_db,
+            ledger_db=bot.ledger_db,
+            disboard_bot_id=bot.config.disboard_bot_id,
+        ),
+    )

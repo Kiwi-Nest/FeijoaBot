@@ -52,6 +52,7 @@ class GuildConfig:
     # QOTD Forwarder
     qotd_source_bot_id: UserId | None = None
     qotd_target_channel_id: ChannelId | None = None
+    default_language: str = "en"  # Default to English
 
     @classmethod
     def from_row(cls, row: tuple) -> Self:
@@ -135,7 +136,9 @@ class ConfigDB:
                     qotd_source_bot_id      INTEGER CHECK(qotd_source_bot_id > 1000000 AND
                                                 qotd_source_bot_id < 10000000000000000000),
                     qotd_target_channel_id  INTEGER CHECK(qotd_target_channel_id > 1000000 AND
-                                                qotd_target_channel_id < 10000000000000000000)
+                                                qotd_target_channel_id < 10000000000000000000),
+
+                    default_language        TEXT NOT NULL DEFAULT 'en'
 
                 ) STRICT, WITHOUT ROWID;
                 """,

@@ -5,12 +5,12 @@ from discord import Forbidden, HTTPException
 from discord.ext import commands, tasks
 
 from modules.dtypes import GuildId
-from modules.KiwiBot import KiwiBot
-from modules.security_utils import is_bot_hierarchy_sufficient, is_role_safe
-from modules.UserDB import UserDB
+from modules.security_utils import check_bot_hierarchy, check_verifiable_role
 
 if TYPE_CHECKING:
     from modules.ConfigDB import GuildConfig
+    from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 # Use Python's logging module for better diagnostics in a reusable component
 log = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class PrunerCog(commands.Cog):
     async def cog_load(self) -> None:
         self.prune_loop.start()
 
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self.prune_loop.cancel()
 
@@ -115,17 +115,19 @@ class PrunerCog(commands.Cog):
 
                 safe_roles_to_remove = []
                 for role in roles_to_remove:
-                    safe_result = is_role_safe(role, require_no_permissions=True)
-                    hierarchy_result = is_bot_hierarchy_sufficient(guild, role)
+                    safe_result = check_verifiable_role(role)
+                    hierarchy_result = check_bot_hierarchy(guild, role)
 
                     if not safe_result.ok:
-                        await self.bot.log_admin_warning(
-                            guild_id=GuildId(guild.id),
-                            warning_type="prune_security",
-                            description=(
+                        self.bot.dispatch(
+                            "security_alert",
+                            guild_id=guild.id,
+                            risk_level="MEDIUM",
+                            details=(
+                                f"**Role Pruning Skipped**\n"
                                 f"I skipped pruning role {role.mention} from {member.mention}. Reason: {safe_result.reason}"
                             ),
-                            level="WARNING",
+                            warning_type="prune_security",
                         )
                         continue  # Skip this unsafe role
 
@@ -133,13 +135,15 @@ class PrunerCog(commands.Cog):
                         safe_roles_to_remove.append(role)
                     else:
                         # Log a warning for the specific role that failed
-                        await self.bot.log_admin_warning(
-                            guild_id=GuildId(guild.id),
-                            warning_type="prune_permission",
-                            description=(
+                        self.bot.dispatch(
+                            "security_alert",
+                            guild_id=guild.id,
+                            risk_level="HIGH",
+                            details=(
+                                f"**Role Pruning Failed**\n"
                                 f"I failed to prune role {role.mention} from {member.mention}. Reason: {hierarchy_result.reason}"
                             ),
-                            level="ERROR",
+                            warning_type="prune_permission",
                         )
 
                 if safe_roles_to_remove:  # Use the filtered list
@@ -157,15 +161,17 @@ class PrunerCog(commands.Cog):
                             "Failed to prune %s: Missing Permissions.",
                             member.display_name,
                         )
-                        await self.bot.log_admin_warning(
-                            guild_id=GuildId(guild.id),
-                            warning_type="prune_permission",
-                            description=(
+                        self.bot.dispatch(
+                            "security_alert",
+                            guild_id=guild.id,
+                            risk_level="HIGH",
+                            details=(
+                                f"**Role Pruning Permission Error**\n"
                                 f"I failed to prune roles from {member.mention}.\n\n"
                                 "**Reason**: `discord.Forbidden`. This is a role hierarchy problem. "
                                 "Please ensure my bot role is higher than the roles I am trying to remove."
                             ),
-                            level="ERROR",
+                            warning_type="prune_permission",
                         )
                     except HTTPException:
                         log.exception("Failed to prune %s", member.display_name)

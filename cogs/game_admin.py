@@ -1,14 +1,16 @@
 import logging
 import re
+from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules.KiwiBot import KiwiBot
-
 # Assuming server_admin.py is in a location Python can import from
 from modules.server_admin import CommandExecutionError, RCONConnectionError, ServerManager, ServerNotFoundError, ServerStateError
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -24,15 +26,15 @@ class GameAdmin(
 ):
     """A cog for managing game servers via Discord, using GroupCog."""
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, server_manager: ServerManager) -> None:
         self.bot = bot
         # The manager now comes directly from the bot instance
-        self.manager: ServerManager | None = self.bot.server_manager
+        self.manager: ServerManager = server_manager
         super().__init__()
 
     # --- Centralized Pre-Command Check ---
 
-    async def interaction_check(self, _interaction: discord.Interaction) -> bool:
+    def interaction_check(self, _interaction: discord.Interaction) -> bool:
         """Central check to ensure the Server Manager is running."""
         if not self.manager:
             msg = "❌ The Server Manager is not running. Check bot logs."
@@ -90,8 +92,6 @@ class GameAdmin(
                     choices.append(app_commands.Choice(name=srv_name, value=srv_name))
         return choices[:25]
 
-    # --- Logging Helper ---
-
     async def _log_action(
         self,
         *,
@@ -136,6 +136,18 @@ class GameAdmin(
                 "Missing permissions to send to log channel %s.",
                 log_channel.name,
             )
+            if interaction.guild:
+                self.bot.dispatch(
+                    "security_alert",
+                    guild_id=interaction.guild.id,
+                    risk_level="HIGH",
+                    details=(
+                        f"**Game Log Permission Error**\n"
+                        f"I attempted to log a game server action to {log_channel.mention}, "
+                        "but I do not have permission to send messages there."
+                    ),
+                    warning_type="game_log_fail",
+                )
         except discord.HTTPException:
             log.exception("Failed to send to log channel")
 
@@ -302,7 +314,6 @@ class GameAdmin(
     ) -> None:
         """Trigger a manual refresh of the server list."""
         await interaction.response.defer()
-        # No 'if not self.manager' check needed here.
 
         await self.manager.force_refresh()
         await interaction.followup.send(
@@ -355,4 +366,11 @@ async def setup(bot: KiwiBot) -> None:
             "GameAdmin cog not loaded. Missing 'MC_GUILD_ID' or 'SERVERS_PATH' in config.",
         )
         return
-    await bot.add_cog(GameAdmin(bot), guild=discord.Object(bot.config.mc_guild_id))
+
+    if not bot.server_manager:
+        log.error(
+            "Server manager failed to load.",
+        )
+        return
+
+    await bot.add_cog(GameAdmin(bot, bot.server_manager), guild=discord.Object(bot.config.mc_guild_id))

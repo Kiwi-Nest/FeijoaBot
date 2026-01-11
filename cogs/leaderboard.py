@@ -1,10 +1,15 @@
+from typing import TYPE_CHECKING
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, NonNegativeInt, UserId
 from modules.enums import StatName
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 
 class LeaderboardView(discord.ui.View):
@@ -12,7 +17,7 @@ class LeaderboardView(discord.ui.View):
 
     def __init__(
         self,
-        bot: "KiwiBot",
+        bot: KiwiBot,
         data: list[tuple[int, UserId, NonNegativeInt]],
         stat_choice: app_commands.Choice[str],
         per_page: int = 10,
@@ -68,8 +73,9 @@ class LeaderboardView(discord.ui.View):
 
 
 class Leaderboard(commands.Cog):
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, user_db: UserDB) -> None:
         self.bot = bot
+        self.user_db = user_db
 
     @app_commands.command(
         name="leaderboard",
@@ -89,7 +95,7 @@ class Leaderboard(commands.Cog):
         # Fetch the leaderboard data from the database
         stat_enum = StatName(stat.value)
 
-        top_users = await self.bot.user_db.get_leaderboard(
+        top_users = await self.user_db.get_leaderboard(
             GuildId(interaction.guild.id),
             stat_enum,
             limit=200,
@@ -105,4 +111,4 @@ class Leaderboard(commands.Cog):
 
 
 async def setup(bot: KiwiBot) -> None:
-    await bot.add_cog(Leaderboard(bot))
+    await bot.add_cog(Leaderboard(bot=bot, user_db=bot.user_db))

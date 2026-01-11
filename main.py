@@ -1,10 +1,13 @@
 import logging
 
 import discord
+from discord import app_commands
 from dotenv import load_dotenv
 
 from modules.config import BotConfig
+from modules.exceptions import UserError
 from modules.KiwiBot import KiwiBot
+from modules.security_utils import SecurityCheckError
 
 # Loads environment variables
 load_dotenv()
@@ -33,6 +36,37 @@ try:
 
     # Pass the config object into the bot's constructor
     bot: KiwiBot = KiwiBot(config=config)
+
+    @bot.tree.error
+    async def on_app_command_error(
+        interaction: discord.Interaction,
+        error: app_commands.AppCommandError,
+    ) -> None:
+        """Global error handler for app commands."""
+        # Unwrap the error if it's a CommandInvokeError
+        if isinstance(error, app_commands.CommandInvokeError):
+            error = error.original
+
+        if isinstance(error, (UserError, SecurityCheckError)):
+            # Send the friendly error message to the user
+            if interaction.response.is_done():
+                await interaction.followup.send(f"❌ {error}", ephemeral=True)
+            else:
+                await interaction.response.send_message(f"❌ {error}", ephemeral=True)
+        else:
+            # Log unexpected errors
+            log.exception(
+                "An unexpected error occurred while processing command: %s",
+                interaction.command.name if interaction.command else "Unknown",
+                exc_info=error,
+            )
+            # Notify the user generically
+            msg = "An unexpected error occurred. Please try again later."
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+
     bot.run(config.token)
 
 except (KeyError, ValueError):

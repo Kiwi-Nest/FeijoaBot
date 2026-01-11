@@ -1,11 +1,15 @@
 import logging
+from typing import TYPE_CHECKING
 
 import discord
 from discord.ext import tasks
 
 from modules.dtypes import GuildId
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
+    from modules.KiwiBot import KiwiBot
 
 # Set up basic logging
 log = logging.getLogger(__name__)
@@ -16,11 +20,12 @@ UPDATE_INTERVAL_MINUTES = 5
 class ServerStats(GuildOnlyHybridCog):
     """A cog that automatically updates server statistics in designated voice channels."""
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
         self.bot = bot
+        self.config_db = config_db
         self.update_stats.start()
 
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         """Clean up when the cog is unloaded."""
         self.update_stats.cancel()
 
@@ -33,7 +38,7 @@ class ServerStats(GuildOnlyHybridCog):
     async def _update_guild_stats(self, guild: discord.Guild) -> None:
         """Handle the statistics update for a single guild."""
         # 1. Fetch the configuration for this specific guild
-        config = await self.bot.config_db.get_guild_config(GuildId(guild.id))
+        config = await self.config_db.get_guild_config(GuildId(guild.id))
 
         # 2. Get channel and role objects from the config IDs
         member_channel = guild.get_channel(config.member_count_channel_id) if config.member_count_channel_id else None
@@ -41,7 +46,7 @@ class ServerStats(GuildOnlyHybridCog):
         tag_channel = guild.get_channel(config.tag_role_channel_id) if config.tag_role_channel_id else None
 
         # 3. Update Member Count Channel
-        if isinstance(member_channel, discord.VoiceChannel):
+        if member_channel and isinstance(member_channel, discord.VoiceChannel):
             member_count = len([m for m in guild.members if not m.bot])
             new_name = f"All members: {member_count}"
             if member_channel.name != new_name:
@@ -52,21 +57,28 @@ class ServerStats(GuildOnlyHybridCog):
                         guild.name,
                         member_count,
                     )
-                except (discord.Forbidden, discord.HTTPException):
-                    log.exception("Failed to update member count for guild %s", guild.name)
-                    await self.bot.log_admin_warning(
-                        guild_id=GuildId(guild.id),
-                        warning_type="serverstats_fail",
-                        description=(
+                except discord.Forbidden:
+                    log.warning(
+                        "Failed to update member count for guild %s: Permission Denied",
+                        guild.name,
+                    )
+                    self.bot.dispatch(
+                        "security_alert",
+                        guild_id=guild.id,
+                        risk_level="HIGH",
+                        details=(
+                            f"**Server Stats Update Failed**\n"
                             f"I failed to update the Member Count channel ({member_channel.mention}).\n\n"
-                            "**Reason**: `discord.Forbidden` or `discord.HTTPException`. "
+                            "**Reason**: `discord.Forbidden` (Permission Denied). "
                             "Please check my permissions in that channel (must have `Manage Channel` and `Connect`)."
                         ),
-                        level="ERROR",
+                        warning_type="serverstats_fail",
                     )
+                except discord.HTTPException:
+                    log.exception("Failed to update member count for guild %s", guild.name)
 
         # 4. Update Tag Role Count Channel
-        if isinstance(tag_channel, discord.VoiceChannel) and tag_role:
+        if isinstance(tag_channel, discord.VoiceChannel) and tag_role and tag_channel:
             tag_members_count = len(tag_role.members)
             new_name = f"Tag Users: {tag_members_count}"
             if tag_channel.name != new_name:
@@ -77,20 +89,32 @@ class ServerStats(GuildOnlyHybridCog):
                         guild.name,
                         tag_members_count,
                     )
-                except (discord.Forbidden, discord.HTTPException):
-                    log.exception("Failed to update tag role count for guild %s", guild.name)
-                    await self.bot.log_admin_warning(
-                        guild_id=GuildId(guild.id),
-                        warning_type="serverstats_fail",
-                        description=(
+                except discord.Forbidden:
+                    log.warning(
+                        "Failed to update tag role count for guild %s: Permission Denied",
+                        guild.name,
+                    )
+                    self.bot.dispatch(
+                        "security_alert",
+                        guild_id=guild.id,
+                        risk_level="HIGH",
+                        details=(
+                            f"**Server Stats Update Failed**\n"
                             f"I failed to update the Tag Role Count channel ({tag_channel.mention}).\n\n"
-                            "**Reason**: `discord.Forbidden` or `discord.HTTPException`. "
+                            "**Reason**: `discord.Forbidden` (Permission Denied). "
                             "Please check my permissions in that channel (must have `Manage Channel` and `Connect`)."
                         ),
-                        level="ERROR",
+                        warning_type="serverstats_fail",
                     )
+                except discord.HTTPException:
+                    log.exception("Failed to update tag role count for guild %s", guild.name)
+
+    @update_stats.before_loop
+    async def before_update_stats(self) -> None:
+        """Wait for the bot to be ready before starting the loop."""
+        await self.bot.wait_until_ready()
 
 
 async def setup(bot: KiwiBot) -> None:
     """Add the cog to the bot."""
-    await bot.add_cog(ServerStats(bot))
+    await bot.add_cog(ServerStats(bot, config_db=bot.config_db))

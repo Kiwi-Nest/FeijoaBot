@@ -1,10 +1,15 @@
 import logging
+from typing import TYPE_CHECKING
 
-import discord
 from discord.ext import commands, tasks
 
 from modules.dtypes import GuildId, UserGuildPair, UserId
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    import discord
+
+    from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 
@@ -12,12 +17,13 @@ log = logging.getLogger(__name__)
 class Activity(commands.Cog):
     """Handle user activity tracking and database updates."""
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, *, user_db: UserDB) -> None:
         self.bot = bot
+        self.user_db = user_db
         self.activity_cache: set[UserGuildPair] = set()
         self.flush_activity_cache.start()
 
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         """Cancel the background task when the cog is unloaded."""
         self.flush_activity_cache.cancel()
 
@@ -163,7 +169,7 @@ class Activity(commands.Cog):
         self.activity_cache.clear()
 
         try:
-            await self.bot.user_db.update_active_users(activity_to_flush)
+            await self.user_db.update_active_users(activity_to_flush)
             log.debug(
                 "Flushed %d user activities to database",
                 len(activity_to_flush),
@@ -175,18 +181,26 @@ class Activity(commands.Cog):
             self.activity_cache.update(activity_to_flush)
 
             for guild_id in guild_ids_in_batch:
-                await self.bot.log_admin_warning(
+                self.bot.dispatch(
+                    "security_alert",
                     guild_id=guild_id,
-                    warning_type="db_flush_fail",
-                    description=(
+                    risk_level="HIGH",
+                    details=(
+                        "**Database Flush Failed**\n"
                         "An error occurred in the `flush_activity_cache` background task. "
                         "User activity is not being saved. This may be a database issue. "
                         "Check console logs for details."
                     ),
-                    level="ERROR",
+                    warning_type="db_flush_fail",
+                    cooldown_seconds=7200,  # 2 hours
                 )
+
+    @flush_activity_cache.before_loop
+    async def before_flush_activity_cache(self) -> None:
+        """Wait for the bot to be ready before starting the loop."""
+        await self.bot.wait_until_ready()
 
 
 async def setup(bot: KiwiBot) -> None:
     """Add the cog to the bot."""
-    await bot.add_cog(Activity(bot))
+    await bot.add_cog(Activity(bot, user_db=bot.user_db))

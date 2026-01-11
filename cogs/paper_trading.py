@@ -43,31 +43,23 @@ SECOND_COOLDOWN: Final[int] = 1
 class PaperTradingCog(GuildOnlyHybridCog):
     """Discord Cog for paper trading frontend interactions."""
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, *, trading_logic: TradingLogic) -> None:
         self.bot = bot
-        # Get the initialized TradingLogic instance from the bot
-        if not bot.trading_logic:
-            msg = "TradingLogic not initialized on bot before cog setup."
-            raise RuntimeError(msg)
-
-        self.trading_logic: TradingLogic = self.bot.trading_logic
+        self.trading_logic = trading_logic
 
     # This is a special event that runs when the cog is loaded
     async def cog_load(self) -> None:
         self.liquidation_check.start()
 
-    def cog_unload(self) -> None:
+    async def cog_unload(self) -> None:
         """Clean up the task when the cog is unloaded."""
         self.liquidation_check.cancel()
 
-    # --- Helper to ensure guild context ---
     async def _ensure_guild_context(self, ctx: commands.Context) -> GuildId | None:
         if not ctx.guild:
             await ctx.send("This command can only be used in a server.", ephemeral=True)
             return None
         return ctx.guild.id
-
-    # --- Helper for Error Handling ---
 
     async def _handle_trading_errors(
         self,
@@ -89,15 +81,6 @@ class PaperTradingCog(GuildOnlyHybridCog):
             ),
         ):
             await target.send(f"❌ Error: {error}", ephemeral=ephemeral)
-        elif isinstance(error, commands.CommandError):
-            log.warning("CommandError during trading operation: %s", error)
-            await target.send(
-                f"⚠️ An application error occurred: {error}",
-                ephemeral=ephemeral,
-            )
-        elif isinstance(error, ConnectionError):
-            log.warning("ConnectionError during trading operation: %s", error)
-            await target.send(f"📡 Error: {error}", ephemeral=ephemeral)
         else:  # Catch unexpected errors
             log.exception("Unexpected error during trading operation: %s", error)
             await target.send(
@@ -129,8 +112,8 @@ class PaperTradingCog(GuildOnlyHybridCog):
         self,
         ctx: commands.Context,
         ticker: str,
-        amount: commands.Range[int, 1],  # ty: ignore [invalid-type-form]
-        leverage: (app_commands.Range[int, 1, 10] | None) = None,  # ty: ignore [invalid-type-form]
+        amount: commands.Range[int, 1],
+        leverage: app_commands.Range[int, 1, 10] | None = None,
     ) -> None:
         """Handle the buy/cover command, calling middleware."""
         guild_id = await self._ensure_guild_context(ctx)
@@ -139,49 +122,45 @@ class PaperTradingCog(GuildOnlyHybridCog):
 
         leverage_int = PositiveInt(leverage or 1)  # Default to 1
 
-        try:
-            (
-                filled_price,
-                _notional_amount_trade,
-                action,
-                timestamp,
-                was_stacked,
-                total_notional,
-            ) = await self.trading_logic.open_position(
-                user_id=ctx.author.id,
-                guild_id=guild_id,
-                ticker=ticker,
-                trade_type="BUY",
-                dollar_amount=amount,
-                leverage=leverage_int,
+        (
+            filled_price,
+            _notional_amount_trade,
+            action,
+            timestamp,
+            was_stacked,
+            total_notional,
+        ) = await self.trading_logic.open_position(
+            user_id=ctx.author.id,
+            guild_id=guild_id,
+            ticker=ticker,
+            trade_type="BUY",
+            dollar_amount=PositiveInt(amount),
+            leverage=leverage_int,
+        )
+
+        notional_amount = amount * leverage_int
+        if was_stacked:
+            response_content = (
+                f"✅ **{action} (Stacked)** ({leverage_int}x Leverage)\n"
+                f"Added **${notional_amount:,.2f}** notional value to your existing\
+                {ticker.upper()} position @ **${filled_price:,.2f}**\n"
+                f"Collateral Added: **${amount:,.2f}**\n"
+                f"New Position Notional: **${total_notional:,.2f}**\n"
+                f"(Price as of {format_dt(timestamp, 'R')})"
+            )
+        else:
+            response_content = (
+                f"✅ **{action}** ({leverage_int}x Leverage)\n"
+                f"Opened new **${notional_amount:,.2f}** position in {ticker.upper()} @ **${filled_price:,.2f}**\n"
+                f"(Price as of {format_dt(timestamp, 'R')})\n"
+                f"Your cash balance has been debited by **${amount:,.2f}** for collateral."
             )
 
-            notional_amount = amount * leverage_int
-            if was_stacked:
-                response_content = (
-                    f"✅ **{action} (Stacked)** ({leverage_int}x Leverage)\n"
-                    f"Added **${notional_amount:,.2f}** notional value to your existing\
-                    {ticker.upper()} position @ **${filled_price:,.2f}**\n"
-                    f"Collateral Added: **${amount:,.2f}**\n"
-                    f"New Position Notional: **${total_notional:,.2f}**\n"
-                    f"(Price as of {format_dt(timestamp, 'R')})"
-                )
-            else:
-                response_content = (
-                    f"✅ **{action}** ({leverage_int}x Leverage)\n"
-                    f"Opened new **${notional_amount:,.2f}** position in {ticker.upper()} @ **${filled_price:,.2f}**\n"
-                    f"(Price as of {format_dt(timestamp, 'R')})\n"
-                    f"Your cash balance has been debited by **${amount:,.2f}** for collateral."
-                )
+        if not self.trading_logic.is_market_open():
+            market_status = self._get_market_status_string()
+            response_content += f"\n\n⚠️ **Note: {market_status}. Position opened at the last available price.**"
 
-            if not self.trading_logic.is_market_open():
-                market_status = self._get_market_status_string()
-                response_content += f"\n\n⚠️ **Note: {market_status}. Position opened at the last available price.**"
-
-            await ctx.send(response_content, ephemeral=True)
-
-        except Exception as e:  # noqa: BLE001
-            await self._handle_trading_errors(ctx, e)
+        await ctx.send(response_content, ephemeral=True)
 
     @commands.hybrid_command(
         name="short",
@@ -198,8 +177,8 @@ class PaperTradingCog(GuildOnlyHybridCog):
         self,
         ctx: commands.Context,
         ticker: str,
-        amount: commands.Range[int, 1],  # ty: ignore [invalid-type-form]
-        leverage: (app_commands.Range[int, 1, 10] | None) = None,  # ty: ignore [invalid-type-form]
+        amount: commands.Range[int, 1],
+        leverage: app_commands.Range[int, 1, 10] | None = None,
     ) -> None:
         """Handle the short-sell command, calling middleware."""
         guild_id = await self._ensure_guild_context(ctx)
@@ -208,50 +187,46 @@ class PaperTradingCog(GuildOnlyHybridCog):
 
         leverage_int = PositiveInt(leverage or 1)  # Default to 1
 
-        try:
-            (
-                filled_price,
-                notional_amount_trade,  # This will be negative
-                action,
-                timestamp,
-                was_stacked,
-                total_notional,
-            ) = await self.trading_logic.open_position(
-                user_id=ctx.author.id,
-                guild_id=guild_id,
-                ticker=ticker,
-                trade_type="SHORT",
-                dollar_amount=amount,
-                leverage=leverage_int,
+        (
+            filled_price,
+            notional_amount_trade,  # This will be negative
+            action,
+            timestamp,
+            was_stacked,
+            total_notional,
+        ) = await self.trading_logic.open_position(
+            user_id=ctx.author.id,
+            guild_id=guild_id,
+            ticker=ticker,
+            trade_type="SHORT",
+            dollar_amount=PositiveInt(amount),
+            leverage=leverage_int,
+        )
+
+        notional_amount = amount * leverage_int
+        if was_stacked:
+            response_content = (
+                f"✅ **{action} (Stacked)** ({leverage_int}x Leverage)\n"
+                f"Added **${notional_amount:,.2f}** notional value to your existing\
+                {ticker.upper()} short position @ **${filled_price:,.2f}**\n"
+                f"Collateral Added: **${amount:,.2f}**\n"
+                f"New Position Notional: **${total_notional:,.2f}**\n"
+                f"(Price as of {format_dt(timestamp, 'R')})"
+            )
+        else:
+            response_content = (
+                f"✅ **{action}** ({leverage_int}x Leverage)\n"
+                f"Opened new **${abs(notional_amount_trade):,.2f}** short position in\
+                {ticker.upper()} @ **${filled_price:,.2f}**\n"
+                f"(Price as of {format_dt(timestamp, 'R')})\n"
+                f"Your cash balance has been debited by **${amount:,.2f}** for collateral."
             )
 
-            notional_amount = amount * leverage_int
-            if was_stacked:
-                response_content = (
-                    f"✅ **{action} (Stacked)** ({leverage_int}x Leverage)\n"
-                    f"Added **${notional_amount:,.2f}** notional value to your existing\
-                    {ticker.upper()} short position @ **${filled_price:,.2f}**\n"
-                    f"Collateral Added: **${amount:,.2f}**\n"
-                    f"New Position Notional: **${total_notional:,.2f}**\n"
-                    f"(Price as of {format_dt(timestamp, 'R')})"
-                )
-            else:
-                response_content = (
-                    f"✅ **{action}** ({leverage_int}x Leverage)\n"
-                    f"Opened new **${abs(notional_amount_trade):,.2f}** short position in\
-                    {ticker.upper()} @ **${filled_price:,.2f}**\n"
-                    f"(Price as of {format_dt(timestamp, 'R')})\n"
-                    f"Your cash balance has been debited by **${amount:,.2f}** for collateral."
-                )
+        if not self.trading_logic.is_market_open():
+            market_status = self._get_market_status_string()
+            response_content += f"\n\n⚠️ **Note: {market_status}. Position opened at the last available price.**"
 
-            if not self.trading_logic.is_market_open():
-                market_status = self._get_market_status_string()
-                response_content += f"\n\n⚠️ **Note: {market_status}. Position opened at the last available price.**"
-
-            await ctx.send(response_content, ephemeral=True)
-
-        except Exception as e:  # noqa: BLE001
-            await self._handle_trading_errors(ctx, e)
+        await ctx.send(response_content, ephemeral=True)
 
     @commands.hybrid_command(
         name="close",
@@ -266,49 +241,45 @@ class PaperTradingCog(GuildOnlyHybridCog):
         self,
         ctx: commands.Context,
         position_id: int,
-        amount: commands.Range[int, 1] | None = None,  # ty: ignore [invalid-type-form]
+        amount: commands.Range[int, 1] | None = None,
     ) -> None:
         """Handle the close position command."""
         guild_id = await self._ensure_guild_context(ctx)
         if not guild_id:
             return
 
-        try:
-            (
-                ticker,
-                pnl_precise,
-                total_credit_precise,
-                final_credit_int,
-                closed_amount,
-                is_partial_close,
-            ) = await self.trading_logic.close_position(
-                user_id=ctx.author.id,
-                guild_id=guild_id,
-                position_id=position_id,
-                close_amount=amount,
-            )
+        (
+            ticker,
+            pnl_precise,
+            total_credit_precise,
+            final_credit_int,
+            closed_amount,
+            is_partial_close,
+        ) = await self.trading_logic.close_position(
+            user_id=ctx.author.id,
+            guild_id=guild_id,
+            position_id=position_id,
+            close_amount=amount,
+        )
 
-            # This is where we show the "slippage fee"
-            transaction_fee = total_credit_precise - final_credit_int
-            pnl_color = "📈" if pnl_precise >= 0 else "📉"
-            title = "✅ **Partial Position Closed**" if is_partial_close else "✅ **Position Closed**"
+        # This is where we show the "slippage fee"
+        transaction_fee = total_credit_precise - final_credit_int
+        pnl_color = "📈" if pnl_precise >= 0 else "📉"
+        title = "✅ **Partial Position Closed**" if is_partial_close else "✅ **Position Closed**"
 
-            response_content = (
-                f"{title} {ticker.upper()} (ID: {position_id})\n"
-                f"Collateral Closed: ${abs(closed_amount):,.2f}\n"
-                f"{pnl_color} Realized P&L: **${pnl_precise:,.2f}**\n\n"
-                f"Total Value: ${total_credit_precise:,.2f}\n"
-                f"Transaction Fee: ${transaction_fee:,.2f}\n"
-                f"Cash Credited: **${final_credit_int:,.2f}**"
-            )
+        response_content = (
+            f"{title} {ticker.upper()} (ID: {position_id})\n"
+            f"Collateral Closed: ${abs(closed_amount):,.2f}\n"
+            f"{pnl_color} Realized P&L: **${pnl_precise:,.2f}**\n\n"
+            f"Total Value: ${total_credit_precise:,.2f}\n"
+            f"Transaction Fee: ${transaction_fee:,.2f}\n"
+            f"Cash Credited: **${final_credit_int:,.2f}**"
+        )
 
-            if is_partial_close:
-                response_content += f"\n\nℹ️ *Part of position {position_id} remains open.*"  # noqa: RUF001
+        if is_partial_close:
+            response_content += f"\n\nℹ️ *Part of position {position_id} remains open.*"  # noqa: RUF001
 
-            await ctx.send(response_content, ephemeral=True)
-
-        except Exception as e:  # noqa: BLE001
-            await self._handle_trading_errors(ctx, e)
+        await ctx.send(response_content, ephemeral=True)
 
     @commands.hybrid_command(
         name="price",
@@ -317,47 +288,42 @@ class PaperTradingCog(GuildOnlyHybridCog):
     @commands.cooldown(1, SECOND_COOLDOWN, commands.BucketType.user)
     async def price(self, ctx: commands.Context) -> None:
         """Handle the price command, reading all prices from the cache."""
-        try:
-            # 1. Ensure the cache is fresh for all tickers
-            await self.trading_logic.price_cache.get_fresh_prices()
+        # 1. Ensure the cache is fresh for all tickers
+        await self.trading_logic.price_cache.get_fresh_prices()
 
-            price_list_lines = []
-            last_update_time = None  # To show in the footer
+        price_list_lines = []
+        last_update_time = None  # To show in the footer
 
-            # 2. Get prices for all supported tickers
-            sorted_tickers = sorted(ALLOWED_STOCKS)
+        # 2. Get prices for all supported tickers
+        sorted_tickers = sorted(ALLOWED_STOCKS)
 
-            for ticker in sorted_tickers:
-                # Get price from the local cache
-                price_data = self.trading_logic.price_cache.get_cached_price(ticker)
+        for ticker in sorted_tickers:
+            # Get price from the local cache
+            price_data = self.trading_logic.price_cache.get_cached_price(ticker)
 
-                if price_data[0] is not None and price_data[1] is not None:
-                    current_price, timestamp = price_data
-                    price_list_lines.append(f"**{ticker}**: ${current_price:.2f}")
-                    if last_update_time is None:  # Grab the first valid timestamp
-                        last_update_time = timestamp
-                else:
-                    price_list_lines.append(f"**{ticker}**: Price N/A")
-
-            # 3. Build the embed
-            embed = discord.Embed(
-                title="📈 Supported Stock Prices",
-                color=discord.Colour.blue(),
-                description="\n".join(price_list_lines),
-            )
-
-            market_status = self._get_market_status_string()
-
-            if last_update_time:
-                title = f"🇺🇸 {market_status} | Prices as of: {format_dt(last_update_time, 'R')}"
+            if price_data[0] is not None and price_data[1] is not None:
+                current_price, timestamp = price_data
+                price_list_lines.append(f"**{ticker}**: ${current_price:.2f}")
+                if last_update_time is None:  # Grab the first valid timestamp
+                    last_update_time = timestamp
             else:
-                title = f"🇺🇸 {market_status} | Prices are currently unavailable."
+                price_list_lines.append(f"**{ticker}**: Price N/A")
 
-            await ctx.send(title, embed=embed, ephemeral=True)
+        # 3. Build the embed
+        embed = discord.Embed(
+            title="📈 Supported Stock Prices",
+            color=discord.Colour.blue(),
+            description="\n".join(price_list_lines),
+        )
 
-        except Exception as e:  # noqa: BLE001
-            # Use the existing error handler
-            await self._handle_trading_errors(ctx, e)
+        market_status = self._get_market_status_string()
+
+        if last_update_time:
+            title = f"🇺🇸 {market_status} | Prices as of: {format_dt(last_update_time, 'R')}"
+        else:
+            title = f"🇺🇸 {market_status} | Prices are currently unavailable."
+
+        await ctx.send(title, embed=embed, ephemeral=True)
 
     @commands.hybrid_command(
         name="portfolio",
@@ -377,106 +343,102 @@ class PaperTradingCog(GuildOnlyHybridCog):
 
         target_member = member or ctx.author
 
-        try:
-            portfolio_data = await self.trading_logic.calculate_portfolio_value(
-                UserId(target_member.id),
-                guild_id,
+        portfolio_data = await self.trading_logic.calculate_portfolio_value(
+            UserId(target_member.id),
+            guild_id,
+        )
+
+        if not portfolio_data:
+            await ctx.send("Could not calculate portfolio.", ephemeral=True)
+            return
+
+        embed = discord.Embed(
+            title=f"{target_member.display_name}'s Portfolio",
+            color=discord.Colour.blue(),
+        )
+        embed.add_field(
+            name="💰 Total Value (Equity)",
+            value=f"${portfolio_data['total_value']:,.2f}",
+            inline=True,
+        )
+        embed.add_field(
+            name="💵 Cash Balance",
+            value=f"${portfolio_data['cash_balance']:,.2f}",
+            inline=True,
+        )
+
+        total_pnl = portfolio_data["total_pnl"]
+        pnl_color = discord.Colour.brand_green() if total_pnl >= 0 else discord.Colour.brand_red()
+        embed.add_field(
+            name="📈 Total P&L",
+            value=f"${total_pnl:+.2f}",
+            inline=True,
+        )
+        embed.color = pnl_color  # Color embed based on overall P&L
+
+        # Add new fields for Long Value and Short Liability
+        embed.add_field(
+            name="⬆️ Long Value",
+            value=f"${portfolio_data['long_value']:,.2f}",
+            inline=True,
+        )
+        embed.add_field(
+            name="⬇️ Short Value",
+            value=f"${portfolio_data['short_value']:,.2f}",
+            inline=True,
+        )
+        embed.add_field(
+            name="🔒 Total Collateral",
+            value=f"${portfolio_data['collateral_held']:,.2f}",
+            inline=True,
+        )
+        embed.add_field(
+            name="Holdings Equity",
+            value=f"${portfolio_data['holdings_equity']:,.2f}",
+            inline=True,
+        )
+
+        holdings_str = ""
+        if portfolio_data["positions"]:
+            # Sort by timestamp
+            sorted_positions = sorted(
+                portfolio_data["positions"],
+                key=lambda x: x["timestamp"],
             )
 
-            if not portfolio_data:
-                await ctx.send("Could not calculate portfolio.", ephemeral=True)
-                return
+            for pos in sorted_positions:
+                pos_id = pos["id"]
+                ticker = pos["ticker"]
+                collateral = pos["collateral"]
+                notional = pos["notional"]
 
-            embed = discord.Embed(
-                title=f"{target_member.display_name}'s Portfolio",
-                color=discord.Colour.blue(),
-            )
-            embed.add_field(
-                name="💰 Total Value (Equity)",
-                value=f"${portfolio_data['total_value']:,.2f}",
-                inline=True,
-            )
-            embed.add_field(
-                name="💵 Cash Balance",
-                value=f"${portfolio_data['cash_balance']:,.2f}",
-                inline=True,
-            )
+                val_str = f"${pos['current_value']:,.2f}" if pos["current_value"] is not None else "N/A"
+                pnl_str = f"${pos['pnl']:+.2f}" if pos["pnl"] is not None else "N/A"
 
-            total_pnl = portfolio_data["total_pnl"]
-            pnl_color = discord.Colour.brand_green() if total_pnl >= 0 else discord.Colour.brand_red()
-            embed.add_field(
-                name="📈 Total P&L",
-                value=f"${total_pnl:+.2f}",
-                inline=True,
-            )
-            embed.color = pnl_color  # Color embed based on overall P&L
+                # Use sign of invested amount
+                pos_type = "LONG" if notional > 0 else "SHORT"
 
-            # Add new fields for Long Value and Short Liability
-            embed.add_field(
-                name="⬆️ Long Value",
-                value=f"${portfolio_data['long_value']:,.2f}",
-                inline=True,
-            )
-            embed.add_field(
-                name="⬇️ Short Value",
-                value=f"${portfolio_data['short_value']:,.2f}",
-                inline=True,
-            )
-            embed.add_field(
-                name="🔒 Total Collateral",
-                value=f"${portfolio_data['collateral_held']:,.2f}",
-                inline=True,
-            )
-            embed.add_field(
-                name="Holdings Equity",
-                value=f"${portfolio_data['holdings_equity']:,.2f}",
-                inline=True,
-            )
+                holdings_str += f"**ID: {pos_id}** | **{ticker}** ({pos_type})\n"
+                holdings_str += f"└ Collateral: ${collateral:,.2f} | Notional: ${notional:,.2f}\n"
+                holdings_str += f"└ Current Val: {val_str} | P&L: {pnl_str}\n"
+        else:
+            holdings_str = "No open positions. Use /buy or /short to open one."
 
-            holdings_str = ""
-            if portfolio_data["positions"]:
-                # Sort by timestamp
-                sorted_positions = sorted(
-                    portfolio_data["positions"],
-                    key=lambda x: x["timestamp"],
-                )
+        if len(holdings_str) > 1024:
+            holdings_str = holdings_str[:1020] + "..."
 
-                for pos in sorted_positions:
-                    pos_id = pos["id"]
-                    ticker = pos["ticker"]
-                    collateral = pos["collateral"]
-                    notional = pos["notional"]
+        embed.add_field(
+            name="📊 Open Positions (Lots)",
+            value=holdings_str,
+            inline=False,
+        )
 
-                    val_str = f"${pos['current_value']:,.2f}" if pos["current_value"] is not None else "N/A"
-                    pnl_str = f"${pos['pnl']:+.2f}" if pos["pnl"] is not None else "N/A"
+        embed.set_footer(
+            text="Use /close <ID> to close a position.",
+        )
 
-                    # Use sign of invested amount
-                    pos_type = "LONG" if notional > 0 else "SHORT"
-
-                    holdings_str += f"**ID: {pos_id}** | **{ticker}** ({pos_type})\n"
-                    holdings_str += f"└ Collateral: ${collateral:,.2f} | Notional: ${notional:,.2f}\n"
-                    holdings_str += f"└ Current Val: {val_str} | P&L: {pnl_str}\n"
-            else:
-                holdings_str = "No open positions. Use /buy or /short to open one."
-
-            if len(holdings_str) > 1024:
-                holdings_str = holdings_str[:1020] + "..."
-
-            embed.add_field(
-                name="📊 Open Positions (Lots)",
-                value=holdings_str,
-                inline=False,
-            )
-
-            embed.set_footer(
-                text="Use /close <ID> to close a position.",
-            )
-
-            market_status = self._get_market_status_string()
-            await ctx.send(f"🇺🇸 {market_status}", embed=embed, ephemeral=True)
-
-        except Exception as e:  # noqa: BLE001
-            await self._handle_trading_errors(ctx, e)
+        market_status = self._get_market_status_string()
+        await ctx.send(f"🇺🇸 {market_status}", embed=embed, ephemeral=True)
 
     @commands.hybrid_command(
         name="stocks",
@@ -584,5 +546,5 @@ async def setup(bot: KiwiBot) -> None:
         log.warning("Skipping loading PaperTradingCog: TradingLogic not initialized.")
         return
 
-    await bot.add_cog(PaperTradingCog(bot))
+    await bot.add_cog(PaperTradingCog(bot, trading_logic=bot.trading_logic))
     log.info("PaperTradingCog frontend added to bot.")

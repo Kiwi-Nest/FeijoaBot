@@ -14,7 +14,7 @@ class BotConfig:
     """A frozen dataclass to hold all bot configuration values."""
 
     token: str
-    disboard_bot_id: UserId
+    disboard_bot_id: UserId | None
     # Special case for leveling system which may operate on a privileged guild
     guild_id: GuildId | None
     swl_guild_id: GuildId | None
@@ -63,7 +63,7 @@ class BotConfig:
 
         return cls(
             token=token,
-            disboard_bot_id=UserId(get_env_int("DISBOARD_BOT_ID")),
+            disboard_bot_id=(UserId(val) if (val := get_env_int("DISBOARD_BOT_ID", required=False)) else None),
             # Optional guild features
             guild_id=(GuildId(val) if (val := get_env_int("UDP_GUILD_ID", required=False)) else None),
             swl_guild_id=(GuildId(val) if (val := get_env_int("SWL_GUILD_ID", required=False)) else None),

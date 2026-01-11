@@ -2,14 +2,19 @@ import logging
 import os
 import random
 import string
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from discord import Object, app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, PositiveInt, UserId
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.config import BotConfig
+    from modules.CurrencyLedgerDB import CurrencyLedgerDB
+    from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 
@@ -40,8 +45,11 @@ class Harvest(GuildOnlyHybridCog):
         "Bone Marrow",
     )
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, *, config: BotConfig, user_db: UserDB, ledger_db: CurrencyLedgerDB) -> None:
         self.bot = bot
+        self.config = config
+        self.user_db = user_db
+        self.ledger_db = ledger_db
 
     async def _process_sale(
         self,
@@ -60,7 +68,7 @@ class Harvest(GuildOnlyHybridCog):
 
         """
         # Verify that the command is used in the correct guild.
-        if ctx.guild is None or ctx.guild.id != self.bot.config.swl_guild_id:
+        if ctx.guild is None or ctx.guild.id != self.config.swl_guild_id:
             await ctx.send("Shh don't worry about it.")
             return
 
@@ -80,12 +88,12 @@ class Harvest(GuildOnlyHybridCog):
         random_num = PositiveInt(random.randint(1, 20))
         guild_id = GuildId(ctx.guild.id)
         user_id = UserId(ctx.author.id)
-        await self.bot.user_db.mint_currency(
+        await self.user_db.mint_currency(
             user_id=user_id,
             guild_id=guild_id,
             amount=random_num,
             event_reason="HARVEST_SALE",
-            ledger_db=self.bot.ledger_db,
+            ledger_db=self.ledger_db,
             initiator_id=user_id,
         )
 
@@ -136,4 +144,7 @@ async def setup(bot: KiwiBot) -> None:
             "Harvest cog not loaded. Missing 'SWL_GUILD_ID'.",
         )
         return
-    await bot.add_cog(Harvest(bot), guild=Object(bot.config.swl_guild_id))
+    await bot.add_cog(
+        Harvest(bot=bot, config=bot.config, user_db=bot.user_db, ledger_db=bot.ledger_db),
+        guild=Object(bot.config.swl_guild_id),
+    )

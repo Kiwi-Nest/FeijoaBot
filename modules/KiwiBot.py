@@ -1,7 +1,6 @@
 import logging
 import pathlib
-import time
-from typing import ClassVar, Literal
+from typing import TYPE_CHECKING, ClassVar
 
 import aiohttp
 import discord
@@ -10,16 +9,19 @@ from discord.app_commands import CommandSyncFailure, TranslationError
 from discord.ext import commands
 from discord.ext.commands import ExtensionAlreadyLoaded, ExtensionFailed, ExtensionNotFound, NoEntryPointError
 
-from modules.config import BotConfig
 from modules.ConfigDB import ConfigDB
 from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.Database import Database
-from modules.dtypes import GuildId
+from modules.exceptions import UserError
 from modules.InvitesDB import InvitesDB
+from modules.ReminderDB import ReminderDB
 from modules.server_admin import ServerManager
 from modules.TaskDB import TaskDB
 from modules.trading_logic import TradingLogic
 from modules.UserDB import UserDB
+
+if TYPE_CHECKING:
+    from modules.config import BotConfig
 
 log = logging.getLogger(__name__)
 
@@ -40,9 +42,7 @@ class KiwiBot(commands.Bot):
             intents=intents,
             help_command=None,
         )
-        self.http_session: aiohttp.ClientSession | None = None
         self.server_manager: ServerManager | None = None
-        self._warning_cooldowns: dict[str, float] = {}
         self.trading_logic: TradingLogic | None = None
 
     # Event to notify when the bot has connected
@@ -59,6 +59,7 @@ class KiwiBot(commands.Bot):
         self.invites_db = InvitesDB(self.database, self.http_session)
         self.ledger_db = CurrencyLedgerDB(self.database)
         self.config_db = ConfigDB(self.database)
+        self.reminder_db = ReminderDB(self.database)
 
         # AWAIT the post-initialization tasks to ensure tables are created
         # UserDB must be first as other tables have foreign keys to it.
@@ -67,6 +68,7 @@ class KiwiBot(commands.Bot):
         await self.invites_db.post_init()
         await self.ledger_db.post_init()
         await self.config_db.post_init()
+        await self.reminder_db.post_init()
 
         # Initialize TradingLogic if API key is present
         if self.config.twelvedata_api_key:
@@ -92,6 +94,45 @@ class KiwiBot(commands.Bot):
             self.server_manager = ServerManager(servers_path=self.config.servers_path)
             await self.server_manager.__aenter__()  # Start its background tasks
 
+        await self.register_global_commands()
+
+        # Special one server cogs
+        for guild_id in (self.config.mc_guild_id, self.config.swl_guild_id):
+            if guild_id:
+                guild = discord.Object(guild_id)
+                try:
+                    synced_guild = await self.tree.sync(guild=guild)
+                    if synced_guild:
+                        log.info(
+                            "Synced %d command(s) for guild %d: %s",
+                            len(synced_guild),
+                            guild_id,
+                            [i.name for i in synced_guild],
+                        )
+                except (HTTPException, CommandSyncFailure, Forbidden):
+                    log.exception(
+                        "Error syncing guild commands for guild %d",
+                        guild_id,
+                    )
+
+        log.info("Setup complete.")
+
+    async def on_ready(self) -> None:
+        if self.guilds:
+            log.info("Bot is in %d guilds.", len(self.guilds))
+        else:
+            log.error("Bot is not in any guilds!")
+
+    async def register_global_commands(self) -> None:
+        try:
+            await self.load_extension("cogs.modlog")
+            log.info("Loaded cogs.modlog (Critical)")
+        except Exception:
+            log.critical(
+                "Failed to load cogs.modlog! Security alerts will be lost.",
+                exc_info=True,
+            )
+
         log.info("Loading extensions...")
         # Now it's safe to load cogs
         try:
@@ -104,6 +145,9 @@ class KiwiBot(commands.Bot):
                             "Skipping load of cogs.paper_trading: API key not configured.",
                         )
                         continue
+
+                    if file.stem == "modlog":
+                        continue  # We already loaded it
 
                     # Try to load each extension individually
                     try:
@@ -133,106 +177,6 @@ class KiwiBot(commands.Bot):
             TranslationError,
         ):
             log.exception("Error syncing global commands")
-
-        # Special one server cogs
-        for guild_id in (self.config.mc_guild_id, self.config.swl_guild_id):
-            if guild_id:
-                guild = discord.Object(guild_id)
-                try:
-                    synced_guild = await self.tree.sync(guild=guild)
-                    if synced_guild:
-                        log.info(
-                            "Synced %d command(s) for guild %d: %s",
-                            len(synced_guild),
-                            guild_id,
-                            [i.name for i in synced_guild],
-                        )
-                except (HTTPException, CommandSyncFailure, Forbidden):
-                    log.exception(
-                        "Error syncing guild commands for guild %d",
-                        guild_id,
-                    )
-
-        log.info("Setup complete.")
-
-    async def on_ready(self) -> None:
-        if self.guilds:
-            log.info("Bot is in %d guilds.", len(self.guilds))
-        else:
-            log.error("Bot is not in any guilds!")
-
-    async def log_admin_warning(
-        self,
-        guild_id: GuildId,
-        warning_type: str,
-        description: str,
-        level: Literal["WARN", "ERROR"] = "WARN",
-        cooldown_seconds: int = 3600,
-    ) -> None:
-        """Send a standardized warning to the guild's configured bot warning channel.
-
-        Includes a cooldown to prevent spam.
-        """
-        # 1. Check Cooldown
-        now = time.time()
-        cooldown_key = f"{guild_id}:{warning_type}"
-        if (last_warn_time := self._warning_cooldowns.get(cooldown_key)) and (now - last_warn_time) < cooldown_seconds:
-            return  # Still on cooldown
-
-        # 2. Get Config & Channel
-        try:
-            config = await self.config_db.get_guild_config(guild_id)
-            if not config.bot_warning_channel_id:
-                return  # Feature not configured
-
-            channel = self.get_channel(config.bot_warning_channel_id)
-            if not isinstance(channel, discord.TextChannel):
-                channel = await self.fetch_channel(config.bot_warning_channel_id)
-
-            if not isinstance(channel, discord.TextChannel):
-                log.warning(
-                    "Bot warning channel %d for guild %d not found or not a text channel.",
-                    config.bot_warning_channel_id,
-                    guild_id,
-                )
-                return
-
-        except (discord.NotFound, discord.Forbidden):
-            log.warning(
-                "Could not fetch or send to bot warning channel for guild %d.",
-                guild_id,
-            )
-            return
-        except Exception:
-            log.exception("Error during bot warning channel retrieval.")
-            return
-
-        # 3. Build Embed
-        if level == "ERROR":
-            title = "❌ Bot Error"
-            color = discord.Colour.red()
-        else:
-            title = "⚠️ Bot Warning"
-            color = discord.Colour.orange()
-
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=color,
-            timestamp=discord.utils.utcnow(),
-        )
-        embed.set_footer(text=f"Warning Type: {warning_type}")
-
-        # 4. Send Message and Set Cooldown
-        try:
-            await channel.send(embed=embed)
-            self._warning_cooldowns[cooldown_key] = now
-        except (discord.Forbidden, discord.HTTPException):
-            log.exception(
-                "Failed to send message to bot warning channel %d in guild %d",
-                channel.id,
-                guild_id,
-            )
 
     async def on_guild_join(self, guild: discord.Guild) -> None:
         """Send a welcome and setup guide when joining a new guild."""
@@ -274,8 +218,21 @@ class KiwiBot(commands.Bot):
         error: commands.CommandError,
     ) -> None:
         """Log unhandled command exceptions."""
+        # Unwrap the error if it's an InvokeError
+        original_error = getattr(error, "original", error)
+
         try:
             raise error
+        except commands.CommandInvokeError:
+            # Check if the wrapped error is one of yours
+            if isinstance(original_error, UserError):
+                # Send the specific message (e.g., "Insufficient funds...")
+                await ctx.send(f"❌ {original_error}", ephemeral=True)
+                return
+
+            # Otherwise log as unexpected
+            log.exception("Unhandled command error in '%s'", ctx.command)
+            await ctx.send("An unexpected error occurred.", ephemeral=True)
         except commands.CommandNotFound:
             pass  # Ignore commands that don't exist
         except commands.CommandOnCooldown as e:

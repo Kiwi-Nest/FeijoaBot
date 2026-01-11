@@ -1,15 +1,16 @@
-import asyncio
 import logging
 from typing import TYPE_CHECKING
 
 import discord
 from discord.ext import commands
 
-from modules.dtypes import GuildId, RoleId, UserId
-from modules.security_utils import is_bot_hierarchy_sufficient, is_verifiable_role
+from modules.dtypes import GuildId, InviterId, RoleId, UserId
+from modules.security_utils import check_bot_hierarchy, check_verifiable_role
 from modules.utils import format_ordinal
 
 if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
+    from modules.InvitesDB import InvitesDB
     from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
@@ -18,8 +19,10 @@ log = logging.getLogger(__name__)
 class JoinLeaveLogCog(commands.Cog):
     """A cog for logging member join and leave events to a specified channel."""
 
-    def __init__(self, bot: "KiwiBot") -> None:
+    def __init__(self, bot: KiwiBot, config_db: ConfigDB, invites_db: InvitesDB) -> None:
         self.bot = bot
+        self.config_db = config_db
+        self.invites_db = invites_db
 
     async def _log_event(
         self,
@@ -28,7 +31,7 @@ class JoinLeaveLogCog(commands.Cog):
         color: discord.Colour,
         description_parts: list[str],
     ) -> None:
-        config = await self.bot.config_db.get_guild_config(GuildId(member.guild.id))
+        config = await self.config_db.get_guild_config(GuildId(member.guild.id))
         log_channel_id = config.join_leave_log_channel_id
 
         if not log_channel_id:
@@ -61,7 +64,20 @@ class JoinLeaveLogCog(commands.Cog):
         try:
             # Defensively disable all pings. Only display mentions.
             await log_channel.send(embed=embed, allowed_mentions=None)
-        except (discord.Forbidden, discord.HTTPException):
+        except discord.Forbidden:
+            log.warning("Permission denied sending join/leave log in guild %s", member.guild.id)
+            self.bot.dispatch(
+                "security_alert",
+                guild_id=member.guild.id,
+                risk_level="HIGH",
+                details=(
+                    f"**Join/Leave Log Permission Error**\n"
+                    f"I cannot send messages to the configured **Join/Leave Log** channel ({log_channel.mention}).\n"
+                    "Please check that I have `Send Messages` and `Embed Links` permissions."
+                ),
+                warning_type="join_leave_log_permission",
+            )
+        except discord.HTTPException:
             log.exception("Failed to send message to join/leave log channel")
 
     async def _autovalidate_member(self, verified_role_id: RoleId, member: discord.Member) -> discord.Role | None:  # noqa: PLR0912
@@ -107,29 +123,33 @@ class JoinLeaveLogCog(commands.Cog):
             role = member.guild.get_role(verified_role_id)
             if role:
                 # Check that the role only has permissions from the allowed list
-                verified_result = is_verifiable_role(role)
-                hierarchy_result = is_bot_hierarchy_sufficient(member.guild, role)
+                verified_result = check_verifiable_role(role)
+                hierarchy_result = check_bot_hierarchy(member.guild, role)
 
                 if not verified_result.ok:
-                    await self.bot.log_admin_warning(
-                        guild_id=GuildId(member.guild.id),
-                        warning_type="dangerous_role_assignment",
-                        description=(
+                    self.bot.dispatch(
+                        "security_alert",
+                        guild_id=member.guild.id,
+                        risk_level="HIGH",
+                        details=(
+                            f"**Auto-Verification Blocked**\n"
                             f"**Blocked** auto-verification for {member.mention}. "
                             f"The configured `verified_role_id` ({role.mention}) has disallowed permissions: "
                             f"{verified_result.reason}"
                         ),
-                        level="ERROR",
+                        warning_type="dangerous_role_assignment",
                     )
                 elif not hierarchy_result.ok:
-                    await self.bot.log_admin_warning(
-                        guild_id=GuildId(member.guild.id),
-                        warning_type="role_hierarchy",
-                        description=(
+                    self.bot.dispatch(
+                        "security_alert",
+                        guild_id=member.guild.id,
+                        risk_level="HIGH",
+                        details=(
+                            f"**Auto-Verification Failed**\n"
                             f"**Failed** auto-verification for {member.mention}. "
                             f"I cannot assign the `verified_role_id` ({role.mention}): {hierarchy_result.reason}"
                         ),
-                        level="ERROR",
+                        warning_type="role_hierarchy",
                     )
                 else:
                     # All checks passed, assign the role
@@ -138,17 +158,17 @@ class JoinLeaveLogCog(commands.Cog):
 
         return verified_role
 
-    @commands.Cog.listener()
-    async def on_member_join(self, member: discord.Member) -> None:
-        """Handle logging when a new member joins or rejoins the server."""
-        config = await self.bot.config_db.get_guild_config(GuildId(member.guild.id))
-        verified_role = await self._autovalidate_member(config.verified_role_id, member)
-
+    async def _handle_join_logging(
+        self,
+        member: discord.Member,
+        inviter_id: InviterId,
+        verified_role: discord.Role | None,
+    ) -> None:
+        config = await self.config_db.get_guild_config(GuildId(member.guild.id))
         if not config.join_leave_log_channel_id:
-            return  # This guild hasn't configured this feature, so we do nothing.
+            return
 
-        # --- 2. Determine Title and Color ---
-        # Use the did_rejoin flag to determine the event type
+        # --- Determine Title and Color ---
         if member.flags.did_rejoin:
             title = "Member Rejoined"
             color = discord.Colour.blue()
@@ -159,26 +179,7 @@ class JoinLeaveLogCog(commands.Cog):
         if member.bot:
             title += " [BOT]"
 
-        # --- 3. Get Inviter from DB (New) ---
-        inviter_mention: str | None = None
-        if not member.bot:
-            try:
-                # Wait a moment for the invites cog to write to the DB
-                # This is less complexity than a cross cog signaling system
-                # For a non critical invite message it's good enough
-                await asyncio.sleep(2)
-                # Use the new DB method
-                inviter_id = await self.bot.invites_db.get_inviter_by_invitee(
-                    UserId(member.id),
-                    GuildId(member.guild.id),
-                )
-                if inviter_id:
-                    inviter_mention = f"<@{inviter_id}>"
-            except Exception:
-                log.exception("Failed to get inviter from DB for join log")
-
-        # --- 4. Build Description ---
-        # Count members who have at least one role (failed or passed captcha)
+        # --- Build Description ---
         member_count = len(
             [m for m in member.guild.members if not m.bot and m.flags.completed_onboarding and len(m.roles) > 1],
         )
@@ -188,17 +189,52 @@ class JoinLeaveLogCog(commands.Cog):
             f"Account created: {discord.utils.format_dt(member.created_at, 'F')} \
 ({discord.utils.format_dt(member.created_at, 'R')})",
         ]
-        if inviter_mention:
-            description.append(f"**Invited by:** {inviter_mention}")
+
+        if inviter_id:
+            description.append(f"**Invited by:** <@{inviter_id}>")
+
         if verified_role:
             description.append(f"**Auto-verified with:** {verified_role.mention}")
 
         await self._log_event(member, title, color, description)
 
     @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member) -> None:
+        """Handle logging when a new member joins or rejoins the server.
+
+        This listener handles verification for all members immediately.
+        Bots are logged immediately. Humans are logged via `on_invite_recorded`.
+        """
+        # 1. Immediate Verification for ALL members
+        # _autovalidate_member handles the bot check internally (skips bots)
+        config = await self.config_db.get_guild_config(GuildId(member.guild.id))
+        verified_role = await self._autovalidate_member(config.verified_role_id, member)
+
+        if member.bot:
+            # Bots don't need invite tracking wait, log immediately
+            await self._handle_join_logging(member, inviter_id=None, verified_role=verified_role)
+
+    @commands.Cog.listener()
+    async def on_invite_recorded(self, member: discord.Member, inviter_id: InviterId) -> None:
+        """Handle logging for human members after invite processing is complete."""
+        # Refresh member from cache to ensure roles are up-to-date
+        member = member.guild.get_member(member.id) or member
+
+        config = await self.config_db.get_guild_config(GuildId(member.guild.id))
+
+        # Check if the member has the verified role (assigned in on_member_join)
+        verified_role = None
+        if config.verified_role_id:
+            role = member.guild.get_role(config.verified_role_id)
+            if role and role in member.roles:
+                verified_role = role
+
+        await self._handle_join_logging(member, inviter_id, verified_role)
+
+    @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member) -> None:
         """Handle logging when a member leaves the server."""
-        config = await self.bot.config_db.get_guild_config(GuildId(member.guild.id))
+        config = await self.config_db.get_guild_config(GuildId(member.guild.id))
         if not config.join_leave_log_channel_id:
             return  # This guild hasn't configured this feature, so we do nothing.
 
@@ -225,7 +261,7 @@ class JoinLeaveLogCog(commands.Cog):
         # --- Get Inviter from DB (New) ---
         if not member.bot:
             try:
-                inviter_id = await self.bot.invites_db.get_inviter_by_invitee(
+                inviter_id = await self.invites_db.get_inviter_by_invitee(
                     UserId(member.id),
                     GuildId(member.guild.id),
                 )
@@ -237,7 +273,7 @@ class JoinLeaveLogCog(commands.Cog):
         await self._log_event(member, title, color, description)
 
 
-async def setup(bot: "KiwiBot") -> None:
+async def setup(bot: KiwiBot) -> None:
     """Add the cog to the bot."""
     # JoinLeaveLogCog is now stateless and will fetch config per guild.
-    await bot.add_cog(JoinLeaveLogCog(bot))
+    await bot.add_cog(JoinLeaveLogCog(bot=bot, config_db=bot.config_db, invites_db=bot.invites_db))

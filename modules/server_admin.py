@@ -23,7 +23,7 @@ try:
 
     AIOMCRCON_AVAILABLE = True
 except ImportError:
-    aiomcrcon = None  # type: ignore[assignment]
+    aiomcrcon = None
     AIOMCRCON_AVAILABLE = False
 
 if TYPE_CHECKING:
@@ -247,7 +247,7 @@ class ServerManager:
             ) as client:
                 response, _ = await client.send_cmd(command)
                 return response
-        except aiomcrcon.errors.RCONConnectionError as e:  # ty: ignore [possibly-missing-attribute]
+        except aiomcrcon.errors.RCONConnectionError as e:
             msg = f"Failed to connect to RCON on '{server_name}'."
             raise RCONConnectionError(
                 msg,
@@ -367,8 +367,8 @@ class ServerManager:
         try:
             proc = await asyncio.create_subprocess_shell(
                 cmd,
-                stdout=asyncio.subprocess.PIPE,  # ty: ignore error[unresolved-attribute]
-                stderr=asyncio.subprocess.PIPE,  # ty: ignore error[unresolved-attribute]
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             _stdout, stderr = await asyncio.wait_for(
                 proc.communicate(),

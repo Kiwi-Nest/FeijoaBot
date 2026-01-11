@@ -1,20 +1,26 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import textwrap
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 
 from modules import audit_utils, security_utils
 
 if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
     from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
-type AuditResult = list[str]
+
+# Use the type alias from audit_utils
+AuditReport = audit_utils.AuditReport
+AuditResult = audit_utils.AuditResult
 
 
 @commands.guild_only()
@@ -32,20 +38,82 @@ class SecurityAudit(
     For security, all responses should be ephemeral.
     """
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
         """Initialize the SecurityAudit cog."""
         self.bot = bot
+        self.config_db = config_db
         super().__init__()
+        # Start the automated background check
+        self.audit_loop.start()
+
+    async def cog_unload(self) -> None:
+        """Cancel the background loop when unloading the cog."""
+        self.audit_loop.cancel()
+
+    @tasks.loop(hours=24)
+    async def audit_loop(self) -> None:
+        """Daily scan for high-priority security risks."""
+        log.info("Running daily security audit loop.")
+
+        for guild in self.bot.guilds:
+            try:
+                # 1. Check Role Hierarchy (Fake Admins)
+                issues = audit_utils.check_role_hierarchy(guild)
+
+                # We iterate the list of AuditIssues returned
+                for issue in issues:
+                    if issue.category == "Fake Admin":
+                        self.bot.dispatch(
+                            "security_alert",
+                            guild_id=guild.id,
+                            risk_level="HIGH",
+                            details=f"**Issue:** {issue.category}\n{issue.details}",
+                        )
+
+                # 2. You can add other checks here (e.g. check_dangerous_roles)
+
+            except Exception:
+                log.exception("Error during security audit for guild %s", guild.name)
+
+    @audit_loop.before_loop
+    async def before_audit_loop(self) -> None:
+        """Wait until the bot is ready before starting the audit loop."""
+        await self.bot.wait_until_ready()
+
+    @staticmethod
+    def _smart_chunk(text: str, limit: int = 1024) -> list[str]:
+        """Split text into chunks of at most `limit` chars, trying to break on newlines/spaces."""
+        if len(text) <= limit:
+            return [text]
+
+        # Use textwrap to handle intelligent line breaking
+        return textwrap.wrap(
+            text,
+            width=limit,
+            break_long_words=True,
+            break_on_hyphens=False,
+            replace_whitespace=False,
+            expand_tabs=False,
+        )
 
     async def _send_audit_embed(
         self,
         ctx: commands.Context,
         title: str,
-        results: AuditResult,
+        results: AuditResult | AuditReport,
         color: discord.Colour,
         conclusion: str = "Audit complete.",
     ) -> None:
-        """Send a standardized, paginated embed for audit results."""
+        """Send a standardized, paginated embed for audit results.
+
+        Args:
+            ctx: The command context.
+            title: Title for the embed.
+            results: Either a list of AuditIssue or an AuditReport instance.
+            color: Color for the embed.
+            conclusion: Concluding message for the audit (default: "Audit complete.").
+
+        """
         if not results:
             embed = discord.Embed(
                 title=title,
@@ -55,28 +123,57 @@ class SecurityAudit(
             await ctx.send(embed=embed, ephemeral=True)
             return
 
+        # Canonicalize input to AuditReport for uniform handling
+        report = AuditReport()
+        if isinstance(results, list):
+            for issue in results:
+                report.add(issue)
+        else:
+            report = results
+
+        summary = report.get_summary()
+
         # Create the first embed
         embed = discord.Embed(title=title, color=color)
-        first_page = True
 
-        full_description = "\n".join(results)
-        for char_chunk_list in discord.utils.as_chunks(full_description, 4000):
-            chunk = "".join(char_chunk_list)  # 4096 limit
-            if first_page:
-                embed.description = chunk
-                await ctx.send(embed=embed, ephemeral=True)
-                first_page = False
-            else:
-                # Send subsequent pages as new, ephemeral embeds
-                followup_embed = discord.Embed(
-                    title=f"{title} (continued)",
-                    description=chunk,
-                    color=color,
-                )
-                await ctx.send(embed=followup_embed, ephemeral=True)
+        # We will split by fields. Discord limit is 25 fields per embed.
+        # AND 6000 characters total per embed.
 
-        # Send a final conclusion message
-        await ctx.send(conclusion, ephemeral=True)
+        field_count = 0
+        current_embed_char_count = len(title)
+
+        first_embed = True
+
+        for category, text in summary.items():
+            # If text is too long for a single field value (1024), we might need to split it
+            # But the requirement was "Fix Pagination with field chunks"
+            # Let's handle simple 1024 chunks for safety
+
+            # Use smart chunking to avoid breaking mentions or markdown
+            chunks = self._smart_chunk(text, 1024)
+
+            for i, chunk in enumerate(chunks):
+                name = category if i == 0 else f"{category} (Cont.)"
+
+                # Check limits
+                if field_count >= 25 or (current_embed_char_count + len(name) + len(chunk)) > 5800:
+                    # Send current embed and start new one
+                    await ctx.send(embed=embed, ephemeral=True)
+                    first_embed = False
+                    embed = discord.Embed(title=f"{title} (Continued)", color=color)
+                    field_count = 0
+                    current_embed_char_count = len(title) + 12  # approximation
+
+                embed.add_field(name=name, value=chunk, inline=False)
+                field_count += 1
+                current_embed_char_count += len(name) + len(chunk)
+
+        if field_count > 0:
+            await ctx.send(embed=embed, ephemeral=True)
+
+        # Send a final conclusion message if it was a multi-page report or just to be polite
+        if not first_embed:
+            await ctx.send(conclusion, ephemeral=True)
 
     @app_commands.command(
         name="validate_config",
@@ -88,7 +185,7 @@ class SecurityAudit(
         if not ctx.guild:
             return  # Should be caught by cog_check, but for type safety
 
-        config = await self.bot.config_db.get_guild_config(ctx.guild.id)
+        config = await self.config_db.get_guild_config(ctx.guild.id)
         results = audit_utils.validate_config(ctx.guild, config)
         await self._send_audit_embed(
             ctx,
@@ -107,7 +204,7 @@ class SecurityAudit(
         if not ctx.guild:
             return
 
-        config = await self.bot.config_db.get_guild_config(ctx.guild.id)
+        config = await self.config_db.get_guild_config(ctx.guild.id)
         results = audit_utils.check_dangerous_roles(ctx.guild, config)
         await self._send_audit_embed(
             ctx,
@@ -144,7 +241,7 @@ class SecurityAudit(
         if not ctx.guild:
             return
 
-        config = await self.bot.config_db.get_guild_config(ctx.guild.id)
+        config = await self.config_db.get_guild_config(ctx.guild.id)
         results = audit_utils.check_risky_overwrites(ctx.guild, config)
         await self._send_audit_embed(
             ctx,
@@ -249,26 +346,85 @@ class SecurityAudit(
         )
         await ctx.send(embed=embed, ephemeral=True)
 
+    def _add_issues_to_report(
+        self,
+        report: AuditReport,
+        *results: AuditResult,
+    ) -> None:
+        """Add issues from multiple audit results to the report."""
+        for result in results:
+            for issue in result:
+                report.add(issue)
+
+    async def _run_full_audit(self, ctx: commands.Context) -> AuditReport:
+        """Run all audit checks concurrently and return grouped results.
+
+        This uses asyncio.TaskGroup (Python 3.11+) for modern concurrency.
+        """
+        report = AuditReport()
+        if not ctx.guild:
+            return report
+
+        config = await self.config_db.get_guild_config(ctx.guild.id)
+
+        # 1. Synchronous Checks
+        sync_results = [
+            audit_utils.validate_config(ctx.guild, config),
+            audit_utils.check_dangerous_roles(ctx.guild, config),
+            audit_utils.check_role_hierarchy(ctx.guild),
+            audit_utils.check_bot_permissions(ctx.guild),
+            audit_utils.check_risky_overwrites(ctx.guild, config),
+            audit_utils.check_desynced_channels(ctx.guild),
+            audit_utils.check_hidden_channels(ctx.guild),
+            audit_utils.check_unused_roles(ctx.guild),
+            audit_utils.check_server_config(ctx.guild),
+        ]
+        self._add_issues_to_report(report, *sync_results)
+
+        # 2. Asynchronous Checks
+        async with asyncio.TaskGroup() as tg:
+            t_invites = tg.create_task(audit_utils.check_invites(ctx.guild))
+            t_webhooks = tg.create_task(audit_utils.check_webhooks(ctx.guild))
+            t_automod = tg.create_task(audit_utils.check_automod(ctx.guild))
+
+        # Collect async results
+        async_results = [t_invites.result(), t_webhooks.result(), t_automod.result()]
+        self._add_issues_to_report(report, *async_results)
+
+        return report
+
     @app_commands.command(
-        name="unused_roles",
-        description="List all roles with 0 members (for cleanup).",
+        name="full",
+        description="Run a simplified, comprehensive security audit of the server.",
     )
-    async def unused_roles(self, interaction: discord.Interaction) -> None:
-        """List roles with zero members."""
+    async def audit_full(self, interaction: discord.Interaction) -> None:
+        """Run a full security audit and report grouped issues."""
         ctx = await self.bot.get_context(interaction, cls=commands.Context)
         if not ctx.guild:
             return
 
-        results = audit_utils.check_unused_roles(ctx.guild)
+        # Defer immediately as this might take a few seconds
+        await ctx.defer(ephemeral=True)
+
+        try:
+            full_report = await self._run_full_audit(ctx)
+        except Exception:
+            log.exception("Failed to run full audit")
+            await ctx.send(
+                "❌ An error occurred while running the audit. Please check logs.",
+                ephemeral=True,
+            )
+            return
+
         await self._send_audit_embed(
             ctx,
-            "Unused Roles (0 Members)",
-            results,
-            color=discord.Colour.dark_green(),
+            "🛡️ Comprehensive Security Audit",
+            full_report,
+            color=discord.Colour.orange(),
         )
 
 
 async def setup(bot: KiwiBot) -> None:
     """Load the SecurityAudit cog."""
-    await bot.add_cog(SecurityAudit(bot))
+    await bot.add_cog(SecurityAudit(bot, config_db=bot.config_db))
     log.info("Cog 'SecurityAudit' loaded.")

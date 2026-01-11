@@ -3,7 +3,7 @@ name = "feijoabot"
 version = "1.0.0"
 description = "Generalized miscellaneous discord bot"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 
 dependencies = [
   "python-dotenv==1.1.1",
@@ -50,7 +50,7 @@ preview = true
 unresolved-import = "ignore"
 
 [tool.uv.sources]
-discord-py = { git = "https://github.com/Rapptz/discord.py/" }
+discord-py = { git = "https://github.com/Rapptz/discord.py" }
 
 [tool.ruff.format]
 quote-style = "double"

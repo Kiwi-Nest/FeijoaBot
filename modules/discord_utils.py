@@ -1,7 +1,11 @@
+from typing import TYPE_CHECKING
+
 import discord
 
 from modules.dtypes import GuildId
-from modules.UserDB import UserDB
+
+if TYPE_CHECKING:
+    from modules.UserDB import UserDB
 
 
 class InvalidRoleError(Exception):

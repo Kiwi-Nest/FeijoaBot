@@ -1,10 +1,13 @@
 import logging
+from typing import TYPE_CHECKING
 
 import discord
 from discord.ext import commands
 
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 

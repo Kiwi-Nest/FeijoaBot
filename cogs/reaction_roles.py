@@ -2,15 +2,17 @@ import logging
 import re
 import time
 from collections import defaultdict
-from typing import TypedDict, cast, override
+from typing import TYPE_CHECKING, TypedDict, cast, override
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules.dtypes import AnalysisStatus, GuildId, MessageId, is_guild_message
-from modules.KiwiBot import KiwiBot
-from modules.security_utils import is_bot_hierarchy_sufficient, is_role_safe
+from modules.dtypes import AnalysisStatus, MessageId, is_guild_message
+from modules.security_utils import check_bot_hierarchy, check_verifiable_role
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
 
 # A structured dictionary for analysis results, improving code clarity.
 
@@ -146,7 +148,7 @@ class ReactionRoles(commands.Cog):
                 continue
 
             # 4. Security Check: Use centralized boolean function
-            safe_result = is_role_safe(role, require_no_permissions=True)
+            safe_result = check_verifiable_role(role)
             if not safe_result.ok:
                 results.append(
                     {
@@ -160,7 +162,7 @@ class ReactionRoles(commands.Cog):
                 continue
 
             # 5. Bot Hierarchy Check: Use centralized boolean function
-            hierarchy_result = is_bot_hierarchy_sufficient(message.guild, role)
+            hierarchy_result = check_bot_hierarchy(message.guild, role)
             if not hierarchy_result.ok:
                 results.append(
                     {
@@ -293,7 +295,7 @@ class ReactionRoles(commands.Cog):
     ) -> bool:
         """Perform security checks before assigning a role."""
         # 1. Stale Cache Security Check (Permissions)
-        safe_result = is_role_safe(role, require_no_permissions=True)
+        safe_result = check_verifiable_role(role)
         if not safe_result.ok:
             log.warning(
                 "Role '%s' failed stale cache security check (permissions no longer safe). User: '%s', Guild: '%s'",
@@ -301,10 +303,21 @@ class ReactionRoles(commands.Cog):
                 member.display_name,
                 guild.name,
             )
+            self.bot.dispatch(
+                "security_alert",
+                guild_id=guild.id,
+                risk_level="HIGH",
+                details=(
+                    f"**Reaction Role Blocked**\n"
+                    f"I blocked the assignment of {role.mention} to {member.mention} because the role is no longer safe.\n"
+                    f"**Reason:** {safe_result.reason}"
+                ),
+                warning_type="reaction_role_unsafe",
+            )
             return False
 
         # 2. Stale Cache Security Check (Hierarchy)
-        hierarchy_result = is_bot_hierarchy_sufficient(guild, role)
+        hierarchy_result = check_bot_hierarchy(guild, role)
         if not hierarchy_result.ok:
             log.warning(
                 "Role '%s' failed stale cache security check (hierarchy no longer sufficient). User: '%s', Guild: '%s'",
@@ -312,15 +325,17 @@ class ReactionRoles(commands.Cog):
                 member.display_name,
                 guild.name,
             )
-            await self.bot.log_admin_warning(
-                guild_id=GuildId(guild.id),
-                warning_type="reaction_role_hierarchy",
-                description=(
+            self.bot.dispatch(
+                "security_alert",
+                guild_id=guild.id,
+                risk_level="HIGH",
+                details=(
+                    f"**Reaction Role Hierarchy Issue**\n"
                     f"I could not assign/remove the reaction role {role.mention} "
                     f"for {member.mention} because my bot role is no longer higher than it. "
                     "Please move my role up in the server settings."
                 ),
-                level="ERROR",
+                warning_type="reaction_role_hierarchy",
             )
             return False
 
@@ -358,16 +373,18 @@ class ReactionRoles(commands.Cog):
                 role.name,
                 member.display_name,
             )
-            await self.bot.log_admin_warning(
-                guild_id=GuildId(member.guild.id),
-                warning_type="reaction_role_permission",
-                description=(
+            self.bot.dispatch(
+                "security_alert",
+                guild_id=member.guild.id,
+                risk_level="HIGH",
+                details=(
+                    f"**Reaction Role Permission Error**\n"
                     f"I failed to assign/remove the reaction role {role.mention} "
                     f"for {member.mention}.\n\n"
                     "**Reason**: `discord.Forbidden`. This is a role hierarchy "
                     f"problem. Please ensure my bot role is higher than the `{role.name}` role."
                 ),
-                level="ERROR",
+                warning_type="reaction_role_permission",
             )
         except discord.HTTPException:
             log.exception(

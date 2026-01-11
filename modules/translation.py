@@ -96,7 +96,7 @@ class TranslationClient:
                 if not translated_text or translated_text.strip().lower() == clean_text.strip().lower():
                     return None
 
-                return translated_text  # type: ignore[no-any-return]
+                return translated_text
 
         except Exception:
             log.exception("Failed to connect to translation service")

@@ -9,10 +9,15 @@ from discord import app_commands
 from discord.ext import commands
 
 if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
     from modules.KiwiBot import KiwiBot
 
-from modules.dtypes import GuildId
-from modules.security_utils import SecurityCheckError, validate_bot_hierarchy, validate_moderation_action
+from modules.dtypes import GuildId, GuildInteraction
+from modules.security_utils import (
+    SecurityCheckError,
+    ensure_bot_hierarchy,
+    ensure_moderation_action,
+)
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +35,7 @@ class DurationTransformer(app_commands.Transformer):
 
     async def transform(
         self,
-        _interaction: discord.Interaction,
+        _interaction: GuildInteraction,
         value: str,
     ) -> datetime.timedelta:
         """Do the conversion."""
@@ -74,8 +79,9 @@ class Moderate(
     Includes built-in rate limiting and centralized hierarchy checks.
     """
 
-    def __init__(self, bot: "KiwiBot") -> None:
+    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
         self.bot = bot
+        self.config_db = config_db
         super().__init__()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -129,9 +135,9 @@ class Moderate(
                 msg = f"❌ Failed to fetch member: {e}"
                 raise app_commands.AppCommandError(msg) from e
 
-        # Run the centralized validation logic
+        # Run the centralized validation logic (raises SecurityCheckError on failure)
         try:
-            validate_moderation_action(interaction, member)
+            ensure_moderation_action(interaction, member)
         except SecurityCheckError as e:
             # Raise a CheckFailure, which our error handler will catch and report.
             raise app_commands.CheckFailure(str(e)) from e
@@ -146,6 +152,10 @@ class Moderate(
     ) -> None:
         """Handle errors for all commands in this Cog."""
         ephemeral = True
+
+        # Unwrap CommandInvokeError if present
+        original_error = error.original if isinstance(error, app_commands.CommandInvokeError) else error
+
         if isinstance(error, app_commands.CommandOnCooldown):
             retry_after = math.ceil(error.retry_after)
             await interaction.response.send_message(
@@ -155,17 +165,12 @@ class Moderate(
         elif isinstance(error, app_commands.CheckFailure):
             # Catches hierarchy checks from interaction_check
             await interaction.response.send_message(f"❌ {error}", ephemeral=ephemeral)
-        elif isinstance(error, app_commands.AppCommandError):
-            # Catches validation errors from inside a command (e.g., mute role hierarchy)
-            # or from a Transformer (e.g., invalid duration).
-            if isinstance(error.original, SecurityCheckError):
-                await interaction.response.send_message(
-                    f"❌ **Configuration Error:**\n{error.original}",
-                    ephemeral=ephemeral,
-                )
-            else:
-                # This catches transformer errors (e.g., "Invalid duration unit")
-                await interaction.response.send_message(str(error.original), ephemeral=ephemeral)
+        elif isinstance(original_error, SecurityCheckError):
+            # Catches SecurityCheckError from commands (e.g., mute role hierarchy)
+            await interaction.response.send_message(
+                f"❌ **Configuration Error:**\n{original_error}",
+                ephemeral=ephemeral,
+            )
         elif isinstance(error, app_commands.MissingPermissions):
             await interaction.response.send_message(
                 f"❌ You do not have the required permissions: {', '.join(error.missing_permissions)}",
@@ -176,6 +181,9 @@ class Moderate(
                 f"❌ I do not have the required permissions: {', '.join(error.missing_permissions)}",
                 ephemeral=ephemeral,
             )
+        elif isinstance(error, app_commands.AppCommandError):
+            # Generic AppCommandError (e.g., from transformers)
+            await interaction.response.send_message(str(error), ephemeral=ephemeral)
         else:
             log.exception("Unhandled error in Moderate cog: %s", error)
             if not interaction.response.is_done():
@@ -187,7 +195,7 @@ class Moderate(
 
     async def _notify_member(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         member: discord.Member,
         action: str,
         reason: str | None,
@@ -228,7 +236,7 @@ class Moderate(
     @app_commands.checks.has_permissions(ban_members=True)  # Still need specific perm
     async def ban(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         member: discord.Member,
         reason: str | None = None,
         delete_messages: Literal[
@@ -272,7 +280,7 @@ class Moderate(
     @app_commands.checks.has_permissions(kick_members=True)  # Still need specific perm
     async def kick(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         member: discord.Member,
         reason: str | None = None,
         notify_member: bool = True,
@@ -310,7 +318,7 @@ class Moderate(
     )
     async def timeout(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         member: discord.Member,
         duration: app_commands.Transform[datetime.timedelta, DurationTransformer],
         reason: str | None = None,
@@ -357,7 +365,7 @@ class Moderate(
     @app_commands.command(name="untimeout", description="Removes a timeout from a member.")
     async def untimeout(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         member: discord.Member,
         reason: str | None = None,
         notify_member: bool = True,
@@ -404,14 +412,14 @@ class Moderate(
     )
     async def mute(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         member: discord.Member,
         reason: str | None = None,
         notify_member: bool = True,
     ) -> None:
         """Mutes a member by adding a 'Muted' role."""
         # _pre_action_checks is handled by interaction_check
-        config = await self.bot.config_db.get_guild_config(
+        config = await self.config_db.get_guild_config(
             GuildId(interaction.guild.id),
         )
         muted_role_id = config.muted_role_id
@@ -428,20 +436,22 @@ class Moderate(
                 "The configured muted role could not be found on this server. It may have been deleted.",
                 ephemeral=True,
             )
-            await self.bot.log_admin_warning(
-                guild_id=GuildId(interaction.guild.id),
-                warning_type="missing_role",
-                description=(
+            self.bot.dispatch(
+                "security_alert",
+                guild_id=interaction.guild.id,
+                risk_level="HIGH",
+                details=(
+                    "**Missing Muted Role**\n"
                     "The `/moderate mute` command failed because the "
                     f"configured `muted_role_id` ({muted_role_id}) could not be found."
                 ),
-                level="ERROR",
+                warning_type="missing_role",
             )
             return
 
         # This check must be inside the command, as it depends on the configured role.
         # It will be caught by on_app_command_error if it fails.
-        validate_bot_hierarchy(interaction, muted_role)
+        ensure_bot_hierarchy(interaction, muted_role)
 
         if muted_role in member.roles:
             await interaction.response.send_message(
@@ -478,14 +488,14 @@ class Moderate(
     )
     async def unmute(
         self,
-        interaction: discord.Interaction,
+        interaction: GuildInteraction,
         member: discord.Member,
         reason: str | None = None,
         notify_member: bool = True,
     ) -> None:
         """Unmutes a member by removing the 'Muted' role."""
         # _pre_action_checks is handled by interaction_check
-        config = await self.bot.config_db.get_guild_config(
+        config = await self.config_db.get_guild_config(
             GuildId(interaction.guild.id),
         )
         muted_role_id = config.muted_role_id
@@ -506,7 +516,7 @@ class Moderate(
 
         # This check must be inside the command, as it depends on the configured role.
         # It will be caught by on_app_command_error if it fails.
-        validate_bot_hierarchy(interaction, muted_role)
+        ensure_bot_hierarchy(interaction, muted_role)
 
         if muted_role not in member.roles:
             await interaction.response.send_message(
@@ -538,6 +548,6 @@ class Moderate(
             log.exception("Failed to unmute %s", member)
 
 
-async def setup(bot: "KiwiBot") -> None:
+async def setup(bot: KiwiBot) -> None:
     """Add the cog to the bot."""
-    await bot.add_cog(Moderate(bot))
+    await bot.add_cog(Moderate(bot, config_db=bot.config_db))

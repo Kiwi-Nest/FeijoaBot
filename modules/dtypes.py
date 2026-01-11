@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Literal, NewType, TypeIs, cast
+from typing import Literal, NewType, TypeIs, cast
 
 import discord
 
@@ -41,13 +41,18 @@ def is_non_negative(num: int) -> TypeIs[NonNegativeInt]:
 
 
 # Define a more specific type for a message we know is from a guild
-if TYPE_CHECKING:
-
-    class GuildMessage(discord.Message):
-        author: discord.Member = cast("discord.Member", None)
-        guild: discord.Guild = cast("discord.Guild", None)
+class GuildMessage(discord.Message):
+    author: discord.Member = cast("discord.Member", None)
+    guild: discord.Guild = cast("discord.Guild", None)
 
 
-def is_guild_message(message: discord.Message) -> "TypeIs[GuildMessage]":
+class GuildInteraction(discord.Interaction):
+    # We explicitly tell the type checker: "In this subclass, guild is NOT None"
+    guild: discord.Guild
+    # You might also want to assert user is a Member, not just User
+    user: discord.Member
+
+
+def is_guild_message(message: discord.Message) -> TypeIs[GuildMessage]:
     """Check if a message is from a guild context."""
     return message.guild is not None and isinstance(message.author, discord.Member)

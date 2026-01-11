@@ -1,5 +1,5 @@
 import logging
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import discord
 from discord import app_commands
@@ -8,7 +8,10 @@ from discord.ext import commands
 from modules.dtypes import GuildId, UserId
 from modules.enums import StatName
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 SECOND_COOLDOWN: Final[int] = 1
@@ -17,8 +20,9 @@ SECOND_COOLDOWN: Final[int] = 1
 class Bal(GuildOnlyHybridCog):
     bot: KiwiBot
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: KiwiBot, user_db: UserDB) -> None:
         self.bot = bot
+        self.user_db = user_db
 
     @commands.hybrid_command(name="bal", description="Displays a user's balance")
     @commands.cooldown(2, SECOND_COOLDOWN, commands.BucketType.user)
@@ -30,8 +34,8 @@ class Bal(GuildOnlyHybridCog):
         user_id = UserId(target_member.id)
         guild_id = GuildId(ctx.guild.id)
 
-        currency_balance = await self.bot.user_db.get_stat(user_id, guild_id, StatName.CURRENCY)
-        bump_count = await self.bot.user_db.get_stat(user_id, guild_id, StatName.BUMPS)
+        currency_balance = await self.user_db.get_stat(user_id, guild_id, StatName.CURRENCY)
+        bump_count = await self.user_db.get_stat(user_id, guild_id, StatName.BUMPS)
         description = f"{target_member.mention}\nWallet: ${currency_balance:,}"
         if bump_count > 0:
             description += f"\nBumps: {bump_count}"
@@ -53,4 +57,4 @@ class Bal(GuildOnlyHybridCog):
 
 
 async def setup(bot: KiwiBot) -> None:
-    await bot.add_cog(Bal(bot))
+    await bot.add_cog(Bal(bot=bot, user_db=bot.user_db))

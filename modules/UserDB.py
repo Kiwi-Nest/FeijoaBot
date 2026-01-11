@@ -11,9 +11,17 @@ from __future__ import annotations
 import logging
 import math
 from typing import TYPE_CHECKING, ClassVar
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # Added for timezone support
 
 from modules.CurrencyLedgerDB import COLLATERAL_POOL_ID, SYSTEM_USER_ID
-from modules.dtypes import GuildId, NonNegativeInt, PositiveInt, ReminderPreference, UserGuildPair, UserId
+from modules.dtypes import (
+    GuildId,
+    NonNegativeInt,
+    PositiveInt,
+    ReminderPreference,
+    UserGuildPair,
+    UserId,
+)
 from modules.enums import StatName
 
 if TYPE_CHECKING:
@@ -58,7 +66,9 @@ class UserDB:
                     CHECK(daily_reminder_preference IN ('NEVER', 'ONCE', 'ALWAYS')),
 
                     has_claimed_daily           INTEGER NOT NULL DEFAULT 0 CHECK(has_claimed_daily IN (0, 1)),
-                    native_language             TEXT DEFAULT 'en',
+                    native_language             TEXT DEFAULT NULL,
+                    autotranslate               INTEGER NOT NULL DEFAULT 0 CHECK(autotranslate IN (0, 1)),
+                    timezone                    TEXT DEFAULT 'UTC',
 
                     -- Keys & Constraints
                     PRIMARY KEY (discord_id, guild_id)
@@ -771,3 +781,74 @@ class UserDB:
             result = await cursor.fetchone()
             # result[0] is the language code string
             return result[0] if result else None
+
+    async def get_timezone(self, user_id: UserId, guild_id: GuildId) -> ZoneInfo:
+        """Fetch the user's timezone, defaulting to UTC if not set."""
+        async with self.database.get_cursor() as cursor:
+            await cursor.execute(
+                f"SELECT timezone FROM {self.USERS_TABLE} WHERE discord_id = ? AND guild_id = ?",  # noqa: S608
+                (user_id, guild_id),
+            )
+            row = await cursor.fetchone()
+
+        if row and row[0]:
+            try:
+                return ZoneInfo(row[0])
+            except (ZoneInfoNotFoundError, ValueError):
+                pass  # Fallback to UTC on bad data
+        return ZoneInfo("UTC")
+
+    async def set_timezone(self, user_id: UserId, guild_id: GuildId, tz_name: str) -> bool:
+        """Set the user's timezone. Returns False if the timezone is invalid."""
+        try:
+            ZoneInfo(tz_name)  # Validate
+        except ZoneInfoNotFoundError:
+            return False
+
+        async with self.database.get_conn() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self.USERS_TABLE} (discord_id, guild_id, timezone)
+                VALUES (?, ?, ?)
+                ON CONFLICT(discord_id, guild_id) DO UPDATE SET
+                    timezone = excluded.timezone
+                """,  # noqa: S608
+                (user_id, guild_id, tz_name),
+            )
+            await conn.commit()
+        return True
+
+    async def set_autotranslate(
+        self,
+        user_id: UserId,
+        guild_id: GuildId,
+        enabled: bool,
+    ) -> None:
+        """Set the user's autotranslate preference (opt-in)."""
+        value = 1 if enabled else 0
+        async with self.database.get_conn() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {self.USERS_TABLE} (discord_id, guild_id, autotranslate)
+                VALUES (?, ?, ?)
+                ON CONFLICT(discord_id, guild_id) DO UPDATE SET
+                    autotranslate = excluded.autotranslate
+                """,  # noqa: S608
+                (user_id, guild_id, value),
+            )
+            await conn.commit()
+
+    async def get_autotranslate(
+        self,
+        user_id: UserId,
+        guild_id: GuildId,
+    ) -> bool:
+        """Check if the user has opted in to autotranslate."""
+        async with self.database.get_cursor() as cursor:
+            await cursor.execute(
+                f"SELECT autotranslate FROM {self.USERS_TABLE} WHERE discord_id = ? AND guild_id = ?",  # noqa: S608
+                (user_id, guild_id),
+            )
+            result = await cursor.fetchone()
+            # result[0] is 1 or 0
+            return bool(result[0]) if result else False
