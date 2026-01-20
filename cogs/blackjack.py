@@ -118,7 +118,7 @@ class BlackjackView(discord.ui.View):
 
         if self.table._state == GameState.ROUND_OVER:
             # Run _end_game to parse results
-            self._end_game()
+            asyncio.create_task(self._end_game())  # noqa: RUF006
         else:
             self._update_buttons()
 
@@ -280,7 +280,7 @@ class BlackjackView(discord.ui.View):
         # Fallback, should not be reached
         return (GameResult.PUSH, f"{hand_name}: Push (unknown result).")
 
-    def _end_game(self) -> None:
+    async def _end_game(self) -> None:
         """Parse results from the table, sets outcome message, and calls for payout/stat updates."""
         # We just need to read the results from each hand.
 
@@ -299,10 +299,7 @@ class BlackjackView(discord.ui.View):
                 hand_name,
             )
             messages.append(message_fragment)
-
-            asyncio.create_task(  # noqa: RUF006
-                self.resolve_payout_and_stats(payout_reason, bet),
-            )
+            await self.resolve_payout_and_stats(payout_reason, bet)
 
         self.outcome_message = "\n".join(messages)
         self._update_buttons()
@@ -316,7 +313,7 @@ class BlackjackView(discord.ui.View):
 
         # inside the .stand() or .double_down() call
         # We just need to call _end_game() to parse and display results.
-        self._end_game()
+        await self._end_game()
         await interaction.edit_original_response(embed=self.create_embed(), view=self)
 
     # --- Embed Creation ---

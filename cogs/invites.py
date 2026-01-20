@@ -41,10 +41,10 @@ class InvitesCog(GuildOnlyHybridCog):
         for guild in self.bot.guilds:
             try:
                 # Store invites with the code as the key and the uses as the value.
-                self.invites[guild.id] = {invite.code: invite.uses for invite in await guild.invites()}
+                self.invites[GuildId(guild.id)] = {invite.code: invite.uses for invite in await guild.invites()}
                 log.info(
                     "Successfully cached %s invites for guild %s.",
-                    len(self.invites[guild.id]),
+                    len(self.invites[GuildId(guild.id)]),
                     guild.name,
                 )
             except discord.Forbidden:
@@ -82,22 +82,25 @@ class InvitesCog(GuildOnlyHybridCog):
             return
 
         inviter_id: InviterId = None
+        invite_code: str | None = None
 
         try:
             inviter = None
             try:
                 guild_invites = self.invites.get(member.guild.id, {})
                 current_invites = await member.guild.invites()
+
                 # Compare current invites with the cached invites to find the one that was used
                 for invite in current_invites:
                     if invite.uses is not None and (
                         invite.code not in guild_invites or invite.uses > guild_invites.get(invite.code, 0)
                     ):
                         inviter = invite.inviter
+                        invite_code = invite.code
                         break  # Found the invite, stop searching.
 
                 # Update the cache with the new uses
-                self.invites[member.guild.id] = {
+                self.invites[GuildId(member.guild.id)] = {
                     invite.code: invite.uses for invite in current_invites if invite.uses is not None
                 }
 
@@ -142,8 +145,8 @@ class InvitesCog(GuildOnlyHybridCog):
             log.exception("Critical error during invite tracking")
             # Ensure we don't crash before dispatching
 
-        # This ALWAYS happens now, guaranteeing the join log appears
-        self.bot.dispatch("invite_recorded", member, inviter_id)
+        # Must ALWAYS happen, guaranteeing the join log appears
+        self.bot.dispatch("invite_recorded", member, inviter_id, invite_code)
 
     @commands.Cog.listener()
     async def on_invite_create(self, invite: discord.Invite) -> None:

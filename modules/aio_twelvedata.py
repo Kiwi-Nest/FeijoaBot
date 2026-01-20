@@ -90,13 +90,10 @@ class AioTwelveDataClient:
     ) -> dict[str, Any]:
         """Make an asynchronous request to the Twelve Data API."""
         if self._session is None:
-            # Should ideally be used within an 'async with' block, but handle direct call
-            # This is less efficient as it creates/closes a session per call
-            async with aiohttp.ClientSession() as session:
-                return await self._perform_request(session, method, endpoint, params)
-        else:
-            # Use the existing session
-            return await self._perform_request(self._session, method, endpoint, params)
+            self._session = aiohttp.ClientSession()
+
+        # Use the existing session
+        return await self._perform_request(self._session, method, endpoint, params)
 
     async def _perform_request(
         self,

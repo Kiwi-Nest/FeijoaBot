@@ -80,15 +80,31 @@ class JoinLeaveLogCog(commands.Cog):
         except discord.HTTPException:
             log.exception("Failed to send message to join/leave log channel")
 
-    async def _autovalidate_member(self, verified_role_id: RoleId, member: discord.Member) -> discord.Role | None:  # noqa: PLR0912
-        """Automatically assign verified role id if user doesn't look bot like."""
+    async def _autovalidate_member(
+        self,
+        verified_role_id: RoleId,
+        member: discord.Member,
+        invite: discord.Invite | None = None,
+    ) -> discord.Role | None:
+        """Automatically assign verified role id if user looks safe.
+
+        Logic:
+        1. BOTS are never auto-verified.
+        2. If invite info is available, reject if the INVITER is a bot.
+        3. If member has strong 'user_indicators' (nitro, avatar, etc), verify them.
+           (This works even if the invite is None/Deleted).
+        """
         verified_role: discord.Role | None = None
 
-        if not verified_role_id or member.bot:
+        if not verified_role_id:
             return verified_role
 
+        # Explicitly exclude bots from verification
+        if member.bot:
+            return None
+
+        # 2. User Account Indicators
         # Log properties that indicate a real, established user account
-        # This helps identify potential self-bots (which would have none of these)
         user_indicators: list[str] = []
         if member.accent_colour:
             user_indicators.append(f"accent_colour={member.accent_colour}")
@@ -119,7 +135,13 @@ class JoinLeaveLogCog(commands.Cog):
             "; ".join(user_indicators) if user_indicators else "None",
         )
 
-        if user_indicators and verified_role_id:
+        # 1. Invite Security Checks
+        if invite and invite.inviter and not invite.inviter.bot and invite.uses < 5 and invite.created_at:
+            age = discord.utils.utcnow() - invite.created_at
+            if age.days < 3:
+                user_indicators.append("safe_invite=True")
+
+        if user_indicators:
             role = member.guild.get_role(verified_role_id)
             if role:
                 # Check that the role only has permissions from the allowed list
@@ -202,32 +224,48 @@ class JoinLeaveLogCog(commands.Cog):
     async def on_member_join(self, member: discord.Member) -> None:
         """Handle logging when a new member joins or rejoins the server.
 
-        This listener handles verification for all members immediately.
-        Bots are logged immediately. Humans are logged via `on_invite_recorded`.
+        Bots are logged immediately.
+        Humans are logged via `on_invite_recorded` to ensure invite tracking is complete.
         """
-        # 1. Immediate Verification for ALL members
-        # _autovalidate_member handles the bot check internally (skips bots)
-        config = await self.config_db.get_guild_config(GuildId(member.guild.id))
-        verified_role = await self._autovalidate_member(config.verified_role_id, member)
-
+        # Bots do not get auto-verified by this system, but we log them immediately.
         if member.bot:
-            # Bots don't need invite tracking wait, log immediately
-            await self._handle_join_logging(member, inviter_id=None, verified_role=verified_role)
+            await self._handle_join_logging(member, inviter_id=None, verified_role=None)
 
     @commands.Cog.listener()
-    async def on_invite_recorded(self, member: discord.Member, inviter_id: InviterId) -> None:
-        """Handle logging for human members after invite processing is complete."""
+    async def on_invite_recorded(
+        self,
+        member: discord.Member,
+        inviter_id: InviterId,
+        invite_code: str | None,
+    ) -> None:
+        """Handle logging and verification for human members after invite processing is complete."""
         # Refresh member from cache to ensure roles are up-to-date
         member = member.guild.get_member(member.id) or member
 
         config = await self.config_db.get_guild_config(GuildId(member.guild.id))
 
-        # Check if the member has the verified role (assigned in on_member_join)
-        verified_role = None
+        # Attempt to find the specific invite object to perform security checks
+        invite: discord.Invite | None = None
+        if not member.bot and invite_code:
+            try:
+                # Iterate active invites to find the object (for age/metadata checks)
+                for inv in await member.guild.invites():
+                    if inv.code == invite_code:
+                        invite = inv
+                        break
+            except Exception:
+                log.exception("Failed to resolve invite object for verification checks")
+
+        # Perform deferred verification for humans
+        verified_role: discord.Role | None = None
         if config.verified_role_id:
+            # Check if role is already there
             role = member.guild.get_role(config.verified_role_id)
             if role and role in member.roles:
                 verified_role = role
+            # If not, try to autovalidate
+            elif not member.bot:
+                verified_role = await self._autovalidate_member(config.verified_role_id, member, invite)
 
         await self._handle_join_logging(member, inviter_id, verified_role)
 
@@ -275,5 +313,4 @@ class JoinLeaveLogCog(commands.Cog):
 
 async def setup(bot: KiwiBot) -> None:
     """Add the cog to the bot."""
-    # JoinLeaveLogCog is now stateless and will fetch config per guild.
     await bot.add_cog(JoinLeaveLogCog(bot=bot, config_db=bot.config_db, invites_db=bot.invites_db))

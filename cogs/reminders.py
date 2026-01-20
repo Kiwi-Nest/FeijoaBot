@@ -153,7 +153,7 @@ class Reminders(commands.Cog):
         except asyncio.CancelledError:
             # Task was cancelled because a newer, earlier reminder was added.
             # We explicitly pass here to allow the task to die gracefully.
-            pass
+            log.warning("Reminder timer cancelled.")
         except Exception:
             log.exception("Error in reminder dispatch")
         finally:

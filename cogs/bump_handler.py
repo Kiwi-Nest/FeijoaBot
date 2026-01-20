@@ -86,7 +86,7 @@ class BumpHandlerCog(commands.Cog):
             is_new_bump: If True, grants a reward. If False, only schedules a reminder.
 
         """
-        if not message.interaction_metadata:
+        if not message.interaction_metadata or not message.interaction_metadata.user:
             log.warning("Bump message %s has no interaction metadata.", message.id)
             return
 

@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """Populate the environment variables then run this to populate counts.json."""
+from __future__ import annotations
 
 import csv
 import json
 import os
 import time
-from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
-from typing import Any
-from zoneinfo import ZoneInfo
+from typing import TYPE_CHECKING, Any
 
 import requests
+from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 # --- Configuration ---
 try:

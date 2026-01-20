@@ -319,6 +319,16 @@ class TradingLogic:
             await conn.commit()
             log.info("Initialized positions database table.")
 
+    async def start(self) -> None:
+        """Start the backend services."""
+        await self.api_client.__aenter__()
+        log.info("TradingLogic backend started.")
+
+    async def close(self) -> None:
+        """Close the backend services."""
+        await self.api_client.__aexit__(None, None, None)
+        log.info("TradingLogic backend closed.")
+
     async def _update_cash_balance(
         self,
         conn: aiosqlite.Connection,  # The transaction connection

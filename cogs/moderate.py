@@ -13,11 +13,7 @@ if TYPE_CHECKING:
     from modules.KiwiBot import KiwiBot
 
 from modules.dtypes import GuildId, GuildInteraction
-from modules.security_utils import (
-    SecurityCheckError,
-    ensure_bot_hierarchy,
-    ensure_moderation_action,
-)
+from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_moderation_action
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +110,11 @@ class Moderate(
             # We don't need to run moderation checks.
             return True
 
-        member_id = int(member_data["value"])
+        try:
+            member_id = int(member_data["value"])
+        except ValueError as e:
+            msg = "Invalid option selected."
+            raise app_commands.AppCommandError(msg) from e
 
         if not interaction.guild:
             # Should be impossible due to guild_only=True, but good practice.

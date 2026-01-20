@@ -12,7 +12,6 @@ from discord.ext.commands import ExtensionAlreadyLoaded, ExtensionFailed, Extens
 from modules.ConfigDB import ConfigDB
 from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.Database import Database
-from modules.exceptions import UserError
 from modules.InvitesDB import InvitesDB
 from modules.ReminderDB import ReminderDB
 from modules.server_admin import ServerManager
@@ -82,6 +81,8 @@ class KiwiBot(commands.Bot):
             log.info("TradingLogic initialized.")
             # Create the portfolios table
             await self.trading_logic.post_init()
+            # Start the trading backend
+            await self.trading_logic.start()
         else:
             log.warning(
                 "TWELVEDATA_API_KEY not set. Paper trading module will be unavailable.",
@@ -212,50 +213,11 @@ class KiwiBot(commands.Bot):
             extra={"*args": args, "**kwargs": kwargs},
         )
 
-    async def on_command_error(
-        self,
-        ctx: commands.Context,
-        error: commands.CommandError,
-    ) -> None:
-        """Log unhandled command exceptions."""
-        # Unwrap the error if it's an InvokeError
-        original_error = getattr(error, "original", error)
-
-        try:
-            raise error
-        except commands.CommandInvokeError:
-            # Check if the wrapped error is one of yours
-            if isinstance(original_error, UserError):
-                # Send the specific message (e.g., "Insufficient funds...")
-                await ctx.send(f"❌ {original_error}", ephemeral=True)
-                return
-
-            # Otherwise log as unexpected
-            log.exception("Unhandled command error in '%s'", ctx.command)
-            await ctx.send("An unexpected error occurred.", ephemeral=True)
-        except commands.CommandNotFound:
-            pass  # Ignore commands that don't exist
-        except commands.CommandOnCooldown as e:
-            await ctx.send(
-                f"This command is on cooldown. Try again in {e.retry_after:.2f}s.",
-                ephemeral=True,
-            )
-        except commands.NoPrivateMessage:
-            await ctx.send(
-                "You may not use this command in DMs.",
-                ephemeral=True,
-            )
-        except commands.MissingPermissions as e:
-            await ctx.send(
-                f"You're missing the permissions to run this command: {', '.join(e.missing_permissions)}",
-                ephemeral=True,
-            )
-        except Exception:
-            log.exception("Unhandled command error in '%s'", ctx.command)
-            await ctx.send("An unexpected error occurred.", ephemeral=True)
-
     async def close(self) -> None:
         """Gracefully close bot resources."""
+        if self.trading_logic:
+            await self.trading_logic.close()
+
         if self.server_manager:
             await self.server_manager.__aexit__(
                 None,

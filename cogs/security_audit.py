@@ -57,20 +57,18 @@ class SecurityAudit(
 
         for guild in self.bot.guilds:
             try:
-                # 1. Check Role Hierarchy (Fake Admins)
-                issues = audit_utils.check_role_hierarchy(guild)
+                config = await self.config_db.get_guild_config(guild.id)
+                issues = audit_utils.validate_config(guild, config)
 
                 # We iterate the list of AuditIssues returned
                 for issue in issues:
-                    if issue.category == "Fake Admin":
+                    if issue.category == "Config Error":
                         self.bot.dispatch(
                             "security_alert",
                             guild_id=guild.id,
                             risk_level="HIGH",
                             details=f"**Issue:** {issue.category}\n{issue.details}",
                         )
-
-                # 2. You can add other checks here (e.g. check_dangerous_roles)
 
             except Exception:
                 log.exception("Error during security audit for guild %s", guild.name)
