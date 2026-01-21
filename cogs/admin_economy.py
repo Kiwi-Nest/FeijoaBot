@@ -1,11 +1,12 @@
+import contextlib
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
+from discord.ext import commands
 
 from modules.dtypes import GuildId, GuildInteraction, NonNegativeInt, PositiveInt, UserId
 from modules.exceptions import UserError
-from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
     from modules.ConfigDB import ConfigDB
@@ -14,7 +15,14 @@ if TYPE_CHECKING:
     from modules.UserDB import UserDB
 
 
-class AdminEconomy(GuildOnlyHybridCog):
+@commands.guild_only()
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.checks.cooldown(5, 10.0, key=lambda i: (i.guild_id, i.user.id))
+class AdminEconomy(
+    commands.GroupCog,
+    group_name="economy",
+    group_description="Admin economy management",
+):
     def __init__(
         self,
         bot: KiwiBot,
@@ -27,6 +35,7 @@ class AdminEconomy(GuildOnlyHybridCog):
         self.user_db = user_db
         self.ledger_db = ledger_db
         self.config_db = config_db
+        super().__init__()
 
     async def _log_economy_action(
         self,
@@ -70,19 +79,11 @@ class AdminEconomy(GuildOnlyHybridCog):
         if details:
             embed.description = details
 
-        try:
+        # Fail silently if we can't log, as the action itself succeeded
+        with contextlib.suppress(discord.Forbidden, discord.HTTPException):
             await mod_channel.send(embed=embed, allowed_mentions=None)
-        except (discord.Forbidden, discord.HTTPException):
-            # Fail silently if we can't log, as the action itself succeeded
-            pass
 
-    group = app_commands.Group(
-        name="economy",
-        description="Admin economy management",
-        default_permissions=discord.Permissions(administrator=True),
-    )
-
-    @group.command(name="set", description="Set a user's exact cash balance.")
+    @app_commands.command(name="set", description="Set a user's exact cash balance.")
     async def set_balance(
         self,
         interaction: GuildInteraction,
@@ -108,7 +109,7 @@ class AdminEconomy(GuildOnlyHybridCog):
         )
         await interaction.response.send_message(f"✅ Set {member.mention}'s balance to ${amount:,}.")
 
-    @group.command(name="mint", description="Print money for a user.")
+    @app_commands.command(name="mint", description="Print money for a user.")
     async def mint(
         self,
         interaction: GuildInteraction,
@@ -137,7 +138,7 @@ class AdminEconomy(GuildOnlyHybridCog):
             f"✅ Minted ${amount:,} for {member.mention}. New Balance: ${new_bal:,}",
         )
 
-    @group.command(name="burn", description="Destroy money from a user.")
+    @app_commands.command(name="burn", description="Destroy money from a user.")
     async def burn(
         self,
         interaction: GuildInteraction,
@@ -171,7 +172,7 @@ class AdminEconomy(GuildOnlyHybridCog):
             f"🔥 Burned ${amount:,} from {member.mention}. New Balance: ${new_bal:,}",
         )
 
-    @group.command(
+    @app_commands.command(
         name="wealth-tax",
         description="Apply a progressive tax (val^x) to Cash AND Stocks.",
     )

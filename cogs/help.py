@@ -29,19 +29,29 @@ class Help(commands.Cog):
         # 1. Fetch Local State
         local_command_list = self.bot.tree.get_commands()
 
-        # 2. Fetch Server State (Crucial: Handle Guild vs Global)
-        # Note: Ideally, you should fetch for the specific guild the bot operates in
-        # or handle this dynamically. Assuming Global for safety, but warning about Guilds.
+        # 2. Fetch Server State (Global first)
+        server_command_list = []
         try:
-            # If your bot is single-guild, pass guild=discord.Object(id=...) here!
             server_command_list = await self.bot.tree.fetch_commands()
         except discord.HTTPException:
-            log.exception("Failed to fetch commands from Discord API")
-            return
+            log.exception("Failed to fetch global commands")
+            # We continue; server_command_list is empty, so we rely on guild commands or fail gracefully later
 
         server_by_name = {cmd.name: cmd for cmd in server_command_list}
 
-        # 3. Build NEW dictionary to avoid Race Condition
+        # 3. Fetch Guild State and Merge
+        # Iterate over all guilds the bot is in to find guild-specific commands
+        if self.bot.guilds:
+            for guild in self.bot.guilds:
+                try:
+                    guild_commands = await self.bot.tree.fetch_commands(guild=guild)
+                    for cmd in guild_commands:
+                        # Overwrite global command with guild version if specific, or add new guild-only command
+                        server_by_name[cmd.name] = cmd
+                except (discord.HTTPException, discord.Forbidden):
+                    log.warning(f"Failed to fetch commands for guild {guild.id} ({guild.name})")
+
+        # 4. Build NEW dictionary to avoid Race Condition
         new_command_list: dict[str, FeijoaCommand] = {}
 
         # Process Root Commands
@@ -53,15 +63,17 @@ class Help(commands.Cog):
             if server:
                 new_command_list[local.name] = FeijoaCommand.from_app_command((local, server))
 
-        # Process Subcommands
+        # Process Subcommands (Local)
         local_subcommands: list[Command] = []
         for group in local_command_list:
             if isinstance(group, Group):
                 local_subcommands.extend(cmd for cmd in group.commands if isinstance(cmd, Command))
 
+        # Process Subcommands (Server)
         server_subcommands: list[AppCommandGroup] = []
-        for group in server_command_list:
-            server_subcommands.extend(option for option in group.options if isinstance(option, AppCommandGroup))
+        for cmd in server_by_name.values():
+            if hasattr(cmd, "options") and cmd.options:
+                server_subcommands.extend(option for option in cmd.options if isinstance(option, AppCommandGroup))
 
         server_subcommand_by_name = {cmd.name: cmd for cmd in server_subcommands}
 
@@ -71,6 +83,7 @@ class Help(commands.Cog):
 
             server = server_subcommand_by_name.get(local.name)
             if server:
+                # Construct key as "group_name subcommand_name"
                 key = f"{server.parent.name} {server.name}"
                 new_command_list[key] = FeijoaCommand.from_app_subcommand((local, server))
 
@@ -154,7 +167,11 @@ class Help(commands.Cog):
                     else:
                         args_usage.append(f"({argument.name}: {argument.type.name})")
 
-                embed.add_field(name="Arguments", inline=False, value="\n----------\n".join(args_str_list))
+                embed.add_field(
+                    name="Arguments",
+                    inline=False,
+                    value="\n----------\n".join(args_str_list),
+                )
 
             usage_str = f"/{requested_cmd.name} {' '.join(args_usage)}"
             embed.add_field(
