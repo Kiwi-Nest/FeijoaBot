@@ -150,9 +150,9 @@ class Help(commands.Cog):
                     )
 
                     if argument.required:
-                        args_usage.append(f"<{argument.name}>")
+                        args_usage.append(f"<{argument.name}: {argument.type.name}>")
                     else:
-                        args_usage.append(f"({argument.name})")
+                        args_usage.append(f"({argument.name}: {argument.type.name})")
 
                 embed.add_field(name="Arguments", inline=False, value="\n----------\n".join(args_str_list))
 
