@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.app_commands import AppCommandGroup, Command, ContextMenu, Group
 from discord.ext import commands, tasks
 
-from modules.dtypes import FeijoaCommand
+from modules.dtypes import FeijoaCommand, PositiveInt
 
 if TYPE_CHECKING:
     from modules.KiwiBot import KiwiBot
@@ -26,35 +26,27 @@ class Help(commands.Cog):
     async def refresh_command_list(self) -> None:
         log.info("Command list is being refreshed...")
 
-        # 1. Fetch Local State
         local_command_list = self.bot.tree.get_commands()
-
-        # 2. Fetch Server State (Global first)
         server_command_list = []
+
         try:
             server_command_list = await self.bot.tree.fetch_commands()
         except discord.HTTPException:
             log.exception("Failed to fetch global commands")
-            # We continue; server_command_list is empty, so we rely on guild commands or fail gracefully later
 
         server_by_name = {cmd.name: cmd for cmd in server_command_list}
 
-        # 3. Fetch Guild State and Merge
-        # Iterate over all guilds the bot is in to find guild-specific commands
         if self.bot.guilds:
             for guild in self.bot.guilds:
                 try:
                     guild_commands = await self.bot.tree.fetch_commands(guild=guild)
                     for cmd in guild_commands:
-                        # Overwrite global command with guild version if specific, or add new guild-only command
                         server_by_name[cmd.name] = cmd
                 except (discord.HTTPException, discord.Forbidden):
                     log.warning(f"Failed to fetch commands for guild {guild.id} ({guild.name})")
 
-        # 4. Build NEW dictionary to avoid Race Condition
         new_command_list: dict[str, FeijoaCommand] = {}
 
-        # Process Root Commands
         for local in local_command_list:
             if isinstance(local, ContextMenu | Group):
                 continue
@@ -63,16 +55,14 @@ class Help(commands.Cog):
             if server:
                 new_command_list[local.name] = FeijoaCommand.from_app_command((local, server))
 
-        # Process Subcommands (Local)
         local_subcommands: list[Command] = []
         for group in local_command_list:
             if isinstance(group, Group):
                 local_subcommands.extend(cmd for cmd in group.commands if isinstance(cmd, Command))
 
-        # Process Subcommands (Server)
         server_subcommands: list[AppCommandGroup] = []
         for cmd in server_by_name.values():
-            if hasattr(cmd, "options") and cmd.options:
+            if cmd.options:
                 server_subcommands.extend(option for option in cmd.options if isinstance(option, AppCommandGroup))
 
         server_subcommand_by_name = {cmd.name: cmd for cmd in server_subcommands}
@@ -83,7 +73,9 @@ class Help(commands.Cog):
 
             server = server_subcommand_by_name.get(local.name)
             if server:
-                self.command_list[server.qualified_name] = FeijoaCommand.from_app_subcommand((local, server))
+                new_command_list[server.qualified_name] = FeijoaCommand.from_app_subcommand((local, server))
+
+        self.command_list = new_command_list
 
     @refresh_command_list.before_loop
     async def before_refresh_command_list(self) -> None:
@@ -92,8 +84,10 @@ class Help(commands.Cog):
 
     async def command_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         return [app_commands.Choice(name=name, value=name)
-                for name in self.command_list.keys()
-                if name.lower().startswith(current.lower())][:25]
+                for name, cmd in self.command_list.items()
+
+                if name.lower().startswith(current.lower()) \
+                and cmd.can_be_executed_by(interaction.permissions)][:25]
 
     @app_commands.command(
         name="help",
@@ -104,17 +98,21 @@ class Help(commands.Cog):
     async def help(self, interaction: discord.Interaction, command: str | None = None) -> None:
         embed = discord.Embed()
         embed.timestamp = discord.utils.utcnow()
+        embed.set_footer(text=f"Requested by {interaction.user}", icon_url=interaction.user.display_avatar)
 
         if not command:  # Show generic command list
             embed.colour = discord.Color.green()
             command_list_str = ""
-            for command_name in self.command_list.keys():
+            for command_name, command in self.command_list.items():
+                if not command.can_be_executed_by(interaction.permissions):
+                    continue
+
                 command_list_str += f"- /{command_name}\n"
 
             embed.title = "Command List"
             embed.description = command_list_str
 
-        elif command in self.command_list.keys():
+        elif command in self.command_list.keys() and self.command_list[command].can_be_executed_by(interaction.permissions):
             requested_cmd = self.command_list[command]
             embed.title = f"Documentation for </{requested_cmd.name}:{requested_cmd.command_id}>"
             embed.colour = discord.Color.green()

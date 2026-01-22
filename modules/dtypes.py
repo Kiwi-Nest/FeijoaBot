@@ -1,9 +1,8 @@
-from typing import Literal, NewType, TypeIs, cast, Final, ClassVar, Self
+from typing import Literal, NewType, TypeIs, cast, Final, ClassVar, Self, TYPE_CHECKING, overload
 
 import discord
 from discord import Permissions
 from discord.app_commands import AppCommand, Command, AppCommandGroup, Group, MissingPermissions
-from discord.app_commands.transformers import CommandParameter
 
 if TYPE_CHECKING:
     from discord.app_commands.transformers import CommandParameter
@@ -139,16 +138,17 @@ class FeijoaCommand:
     def get_pretty_printed_perms(self) -> str | None:
         if self.permissions & Permissions.administrator.flag: return "administrator"
 
-        # Check for Admin flag explicitly first
-        if self.permissions.value & Permissions.administrator.flag:
-            return "Administrator"
-
         # Fix: Check where bitwise AND is NOT zero (meaning permission is required)
-        return ", ".join(
-            [
+        return ", ".join([
                 flag_name.replace("_", " ").title()
                 for flag_name, flag_val in Permissions.VALID_FLAGS.items()
-                if self.permissions & flag_val == 0])
+                if self.permissions & flag_val == 0
+        ])
+
+    def can_be_executed_by(self, user_perms: Permissions):
+        if self.permissions == 0: return True
+
+        return self.permissions & user_perms.value
 
     def is_staff(self) -> bool:
         if not self.permissions: return False
