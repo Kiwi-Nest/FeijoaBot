@@ -1,9 +1,9 @@
-import dataclasses
-from typing import TYPE_CHECKING, ClassVar, Final, Literal, NewType, Self, TypeIs, cast
+from typing import Literal, NewType, TypeIs, cast, Final, ClassVar, Self
 
 import discord
 from discord import Permissions
-from discord.app_commands import AppCommand, AppCommandGroup, Command
+from discord.app_commands import AppCommand, Command, AppCommandGroup, Group, MissingPermissions
+from discord.app_commands.transformers import CommandParameter
 
 if TYPE_CHECKING:
     from discord.app_commands.transformers import CommandParameter
@@ -67,46 +67,77 @@ def is_guild_message(message: discord.Message) -> TypeIs[GuildMessage]:
 type FullCommand = tuple[Command, AppCommand]
 type FullSubcommand = tuple[Command, AppCommandGroup]
 
+# Data class used for fake interactions
+class FakeInteraction:
+    permissions: Permissions
+
+    def __init__(self, permissions: Permissions):
+        self.permissions = permissions
 
 # Data class used to represent Feijoa's command, used in help
-@dataclasses.dataclass
 class FeijoaCommand:
-    STAFF_PERMS: ClassVar[PositiveInt] = (
-        Permissions.manage_guild.flag
-        | Permissions.manage_roles.flag
-        | Permissions.moderate_members.flag
-        | Permissions.kick_members.flag
-    )
+    STAFF_PERMS: ClassVar[set[PositiveInt]] = {Permissions.manage_guild.flag, Permissions.manage_roles.flag, Permissions.moderate_members.flag, Permissions.kick_members.flag}
 
     name: Final[str]
     description: Final[str]
     args: Final[dict[str, CommandParameter]]
-    permissions: Final[Permissions]
-    id: Final[PositiveInt]
+    permissions: Final[int]
+    command_id: Final[PositiveInt]
+
+    def __init__(self, name: str, description: str, params: dict[str, CommandParameter], permissions: PositiveInt, command_id: PositiveInt):
+        self.name = name
+        self.description = description
+        self.args = params
+        self.command_id = command_id
+        self.permissions = permissions
+
+    @staticmethod
+    def _permission_walker(command: Command | Group) -> PositiveInt:
+        perms = 0
+
+        if command.default_permissions:
+            perms |= command.default_permissions.value
+
+        if command.parent:
+            perms |= FeijoaCommand._permission_walker(command.parent)
+
+        return PositiveInt(perms)
+
+    @staticmethod
+    def _check_walker(command: Command | Group) -> PositiveInt:
+        permissions = 0
+
+        def check(cmd: Command) -> int:
+            perms = 0
+            for ch in cmd.checks:
+                try:
+                    ch(FakeInteraction(permissions=Permissions(0)))
+                except MissingPermissions as e:
+                    missing = Permissions()
+
+                    for name in e.missing_permissions:
+                        setattr(missing, name, True)
+
+                    perms |= missing.value
+
+            return perms
+
+        permissions |= check(command)
+        if command.parent and isinstance(command.parent, Command):
+            permissions |= FeijoaCommand._check_walker(command.parent)
+
+        return PositiveInt(permissions)
 
     @classmethod
     def from_app_command(cls, command: FullCommand) -> Self:
-        return cls(
-            command[0].name,
-            command[0].description,
-            command[0]._params,
-            command[1].default_member_permissions,
-            PositiveInt(command[1].id),
-        )
+        return cls(command[0].name, command[0].description, command[0]._params, PositiveInt(FeijoaCommand._permission_walker(command[0]) | FeijoaCommand._check_walker(command[0])), PositiveInt(command[1].id))
 
     @classmethod
     def from_app_subcommand(cls, command: FullSubcommand) -> Self:
-        return cls(
-            command[1].parent.name + " " + command[1].name,
-            command[0].description,
-            command[0]._params,
-            command[1].parent.default_member_permissions,
-            PositiveInt(command[1].parent.id),
-        )
+        return cls(command[1].qualified_name, command[0].description, command[0]._params, PositiveInt(FeijoaCommand._permission_walker(command[0]) | FeijoaCommand._check_walker(command[0])), PositiveInt(command[1].parent.id))
 
     def get_pretty_printed_perms(self) -> str | None:
-        if not self.permissions:
-            return None
+        if self.permissions & Permissions.administrator.flag: return "administrator"
 
         # Check for Admin flag explicitly first
         if self.permissions.value & Permissions.administrator.flag:
@@ -117,14 +148,17 @@ class FeijoaCommand:
             [
                 flag_name.replace("_", " ").title()
                 for flag_name, flag_val in Permissions.VALID_FLAGS.items()
-                if self.permissions.value & flag_val != 0
-            ],
-        )
+                if self.permissions & flag_val == 0])
 
     def is_staff(self) -> bool:
-        return (self.permissions is not None) and (
-            bool(self.permissions.value & self.STAFF_PERMS) or bool(self.permissions.value & Permissions.administrator.flag)
-        )
+        if not self.permissions: return False
+        if self.permissions & Permissions.administrator.flag: return True
+
+        for perm in FeijoaCommand.STAFF_PERMS:
+            if self.permissions & perm:
+                return True
+
+        return False
 
     def has_args(self) -> bool:
         return self.args is not None and len(self.args) > 0
