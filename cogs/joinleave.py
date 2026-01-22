@@ -118,7 +118,7 @@ class JoinLeaveLogCog(commands.Cog):
             user_indicators.append(f"boosting_since={member.premium_since}")
 
         # PublicUserFlags
-        public_flags = [flag_name for flag_name, has_flag in member.public_flags if has_flag]
+        public_flags = [flag_name for flag_name, has_flag in member.public_flags if has_flag and flag_name != "spammer"]
         if public_flags:
             user_indicators.append(f"public_flags={','.join(public_flags)}")
 
