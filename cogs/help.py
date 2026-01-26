@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.app_commands import AppCommandGroup, Command, ContextMenu, Group
 from discord.ext import commands, tasks
 
-from modules.dtypes import FeijoaCommand, PositiveInt
+from modules.help_command import FeijoaCommand
 
 if TYPE_CHECKING:
     from modules.KiwiBot import KiwiBot
@@ -83,11 +83,11 @@ class Help(commands.Cog):
         await self.bot.wait_until_ready()
 
     async def command_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        return [app_commands.Choice(name=name, value=name)
-                for name, cmd in self.command_list.items()
-
-                if name.lower().startswith(current.lower()) \
-                and cmd.can_be_executed_by(interaction.permissions)][:25]
+        return [
+            app_commands.Choice(name=name, value=name)
+            for name, cmd in self.command_list.items()
+            if name.lower().startswith(current.lower()) and cmd.can_be_executed_by(interaction.permissions)
+        ][:25]
 
     @app_commands.command(
         name="help",
@@ -112,28 +112,36 @@ class Help(commands.Cog):
             embed.title = "Command List"
             embed.description = command_list_str
 
-        elif command in self.command_list.keys() and self.command_list[command].can_be_executed_by(interaction.permissions):
+        elif command in self.command_list and self.command_list[command].can_be_executed_by(interaction.permissions):
             requested_cmd = self.command_list[command]
             embed.title = f"Documentation for </{requested_cmd.name}:{requested_cmd.command_id}>"
             embed.colour = discord.Color.green()
 
-            embed.add_field(name="Command Information", inline=False, value="\n".join([
-                f"Command: `{requested_cmd.name}`",
-                f"Description: `{requested_cmd.description}`",
-                f"Is Staff-Only: `{requested_cmd.is_staff()}`",
-                f"[Required Permissions](<https://discord.com/developers/docs/topics/permissions>): `{requested_cmd.permissions}`"
-            ]))
+            embed.add_field(
+                name="Command Information",
+                inline=False,
+                value="\n".join(
+                    [
+                        f"Command: `{requested_cmd.name}`",
+                        f"Description: `{requested_cmd.description}`",
+                        f"Is Staff-Only: `{requested_cmd.is_staff()}`",
+                        f"[Required Permissions](<https://discord.com/developers/docs/topics/permissions>): `{requested_cmd.permissions}`",
+                    ],
+                ),
+            )
 
             args_usage: list[str] = []
             if requested_cmd.has_args():
                 args_str = ""
                 for index, argument in enumerate(requested_cmd.args.values()):
-                    args_str += "\n".join([
-                        f"Name: `{argument.name}`",
-                        f"Description: `{argument.description}`",
-                        f"Type: `{argument.type.name}`",
-                        f"Required: `{argument.required}`",
-                    ])
+                    args_str += "\n".join(
+                        [
+                            f"Name: `{argument.name}`",
+                            f"Description: `{argument.description}`",
+                            f"Type: `{argument.type.name}`",
+                            f"Required: `{argument.required}`",
+                        ],
+                    )
 
                     if argument.required:
                         args_usage.append(f"<{argument.name}: {argument.type.name}>")
@@ -142,10 +150,14 @@ class Help(commands.Cog):
 
                     if index != len(requested_cmd.args) - 1:
                         args_str += "\n----------\n"
-                
+
                 embed.add_field(name="Arguments", inline=False, value=args_str)
 
-            embed.add_field(name="Usage", inline=False, value=f"<> = required; () = optional\n```/{requested_cmd.name} {" ".join(args_usage)}```")
+            embed.add_field(
+                name="Usage",
+                inline=False,
+                value=f"<> = required; () = optional\n```/{requested_cmd.name} {' '.join(args_usage)}```",
+            )
 
         else:  # Invalid command
             embed.title = "Error"

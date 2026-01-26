@@ -156,7 +156,6 @@ class Reminders(commands.Cog):
             log.warning("Reminder timer cancelled.")
         except Exception:
             log.exception("Error in reminder dispatch")
-        finally:
             self._next_reminder_msg_id = None
             await self.schedule_next()
 
