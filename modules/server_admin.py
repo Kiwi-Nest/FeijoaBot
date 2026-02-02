@@ -423,3 +423,49 @@ class ServerManager:
             return False
         else:
             return True
+
+
+ANSI_END = "\033[0m"
+
+MC_TO_ANSI = {
+    # Colors
+    "§c": "\033[0;31m",
+    "§4": "\033[0;31m",  # Red
+    "§6": "\033[0;33m",
+    "§e": "\033[0;33m",  # Yellow
+    "§a": "\033[0;32m",
+    "§2": "\033[0;32m",  # Green
+    "§3": "\033[0;36m",
+    "§b": "\033[0;36m",  # Cyan
+    "§1": "\033[0;34m",
+    "§9": "\033[0;34m",  # Blue
+    "§5": "\033[0;35m",
+    "§d": "\033[0;35m",  # Pink
+    "§f": "\033[0;37m",  # White
+    "§0": "\033[0;30m",
+    "§8": "\033[0;30m",  # Gray
+    # Formatting
+    "§l": "\033[1;2m",  # Bold
+    "§n": "\033[4;2m",  # Underline
+    # Resets
+    "§r": ANSI_END,
+    "§x": ANSI_END,
+    "§o": ANSI_END,
+    "§m": ANSI_END,
+    "§7": "",  # Default grey — strip
+}
+
+
+def format_mc_ansi(rawtext: str) -> str:
+    if "§" not in rawtext:
+        return rawtext
+
+    text = rawtext
+    for code, ansi in MC_TO_ANSI.items():
+        text = text.replace(code, ansi)
+
+    if text == rawtext:
+        return rawtext
+
+    text = text.replace("\n", "\n" + ANSI_END)
+    return f"```ansi\n{text}{ANSI_END}\n```"

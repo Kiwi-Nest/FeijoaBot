@@ -7,7 +7,14 @@ from discord import app_commands
 from discord.ext import commands
 
 # Assuming server_admin.py is in a location Python can import from
-from modules.server_admin import CommandExecutionError, RCONConnectionError, ServerManager, ServerNotFoundError, ServerStateError
+from modules.server_admin import (
+    CommandExecutionError,
+    RCONConnectionError,
+    ServerManager,
+    ServerNotFoundError,
+    ServerStateError,
+    format_mc_ansi,
+)
 
 if TYPE_CHECKING:
     from modules.KiwiBot import KiwiBot
@@ -290,8 +297,10 @@ class GameAdmin(
         if len(response_content) > MAX_LENGTH:
             response_content = response_content[:MAX_LENGTH] + "\n... (response truncated)"
 
+        response_content = format_mc_ansi(response_content) if "§" in response_content else f"```\n{response_content}\n```"
+
         await interaction.followup.send(
-            f"✅ RCON command sent to `{server}` by {interaction.user.mention}.\n```\n{response_content}\n```",
+            f"✅ RCON command sent to `{server}` by {interaction.user.mention}.\n{response_content}",
         )
         await self._log_action(
             interaction=interaction,
