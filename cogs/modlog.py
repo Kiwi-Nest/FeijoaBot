@@ -62,7 +62,7 @@ class ModLogCog(commands.Cog):
         if include_reason:
             embed.add_field(
                 name="Reason",
-                value=reason if reason else "Not provided.",
+                value=reason or "Not provided.",
                 inline=False,
             )
         if duration:
@@ -91,7 +91,7 @@ class ModLogCog(commands.Cog):
         try:
             # Defensively disable all pings. Only display mentions.
             await mod_channel.send(embed=embed, allowed_mentions=None)
-        except (discord.Forbidden, discord.HTTPException):
+        except discord.Forbidden, discord.HTTPException:
             # Log the exception but don't re-raise, as logging should not block other operations.
             log.exception("Failed to send log message to mod channel")
             self.bot.dispatch(
@@ -372,7 +372,7 @@ class ModLogCog(commands.Cog):
         # 5. Send the Alert
         try:
             await channel.send(embed=embed)
-        except (discord.Forbidden, discord.HTTPException):
+        except discord.Forbidden, discord.HTTPException:
             log.warning(
                 "Could not send security alert in guild %d: Missing Permissions or HTTP error",
                 guild_id,

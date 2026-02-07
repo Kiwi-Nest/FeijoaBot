@@ -69,7 +69,7 @@ class GuildConfig:
                 field_values[prune_roles_index] = [RoleId(int(r_id)) for r_id in prune_roles_str.split(",") if r_id.isdigit()]
             else:
                 field_values[prune_roles_index] = None
-        except (ValueError, IndexError):
+        except ValueError, IndexError:
             log.exception("Failed to parse roles_to_prune from database row.")
         return cls(*field_values)
 

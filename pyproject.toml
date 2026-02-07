@@ -11,6 +11,7 @@ dependencies = [
   "aiosqlite==0.21.0",
   "blackjack21>=4.0.0",
   "requests>=2.32.5",
+  "async-mojang>=1.0.5",
 ]
 
 [tool.ruff]
@@ -51,6 +52,8 @@ unresolved-import = "ignore"
 
 [tool.uv.sources]
 discord-py = { git = "https://github.com/Rapptz/discord.py" }
+async-mojang = { git = "https://github.com/Restitutor/Async-Mojang" }
+blackjack21 = { git = "https://github.com/Restitutor/blackjack21", rev = "v5.0.0" }
 
 [tool.ruff.format]
 quote-style = "double"

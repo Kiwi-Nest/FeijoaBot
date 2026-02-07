@@ -205,7 +205,7 @@ class AioTwelveDataClient:
                 type(data).__name__,
             )
 
-        except (AioTwelveDataRequestError, AioTwelveDataApiError):
+        except AioTwelveDataRequestError, AioTwelveDataApiError:
             # Log and return None, don't raise. Let the caller decide how to handle.
             log.exception("Failed to fetch market state for (%s)", exchange)
             return None
@@ -267,7 +267,7 @@ class AioTwelveDataClient:
                                     ticker,
                                     price_map[ticker],
                                 )
-                            except (ValueError, TypeError):
+                            except ValueError, TypeError:
                                 log.warning(
                                     "Could not parse price for %s in batch response: %s",
                                     ticker,
@@ -299,7 +299,7 @@ class AioTwelveDataClient:
                 # Cannot reliably map prices, return None for all
 
         # Handle broader request errors (ConnectionError, InvalidTickerError if 400 applies to *all* symbols, etc.)
-        except (AioTwelveDataRequestError, AioTwelveDataApiError):
+        except AioTwelveDataRequestError, AioTwelveDataApiError:
             log.exception("Failed to fetch batch prices for (%s)", symbol_param)
             # Depending on the error, you might want to raise it or just return None for all
             # For now, we return the map with Nones as initialized

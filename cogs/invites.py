@@ -249,7 +249,7 @@ class InvitesCog(GuildOnlyHybridCog):
                 member_info = member_data["member"]
                 invitee_id = UserId(int(member_info["user"]["id"]))
                 joined_at_str = member_info.get("joined_at")
-            except (KeyError, ValueError):
+            except KeyError, ValueError:
                 continue
 
             joined_at_db: str | None = None

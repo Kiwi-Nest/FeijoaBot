@@ -277,7 +277,7 @@ class ReactionRoles(commands.Cog):
             message = await cast("discord.TextChannel", channel).fetch_message(
                 payload.message_id,
             )
-        except (discord.NotFound, discord.Forbidden):
+        except discord.NotFound, discord.Forbidden:
             log.debug(
                 "Could not fetch message %d from channel %d.",
                 payload.message_id,

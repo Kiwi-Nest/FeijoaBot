@@ -325,7 +325,7 @@ class UserDB:
                     sender_id=SYSTEM_USER_ID,
                     receiver_id=user_id,
                     amount=amount,
-                    initiator_id=initiator_id if initiator_id else user_id,
+                    initiator_id=initiator_id or user_id,
                 )
                 await conn.commit()
             except Exception:
@@ -794,7 +794,7 @@ class UserDB:
         if row and row[0]:
             try:
                 return ZoneInfo(row[0])
-            except (ZoneInfoNotFoundError, ValueError):
+            except ZoneInfoNotFoundError, ValueError:
                 pass  # Fallback to UTC on bad data
         return ZoneInfo("UTC")
 

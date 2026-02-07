@@ -239,7 +239,7 @@ class Daily(GuildOnlyHybridCog):
                 user = await self.bot.fetch_user(user_id)
                 await user.send(reminder_message)
                 success_count += 1
-            except (discord.Forbidden, discord.NotFound):
+            except discord.Forbidden, discord.NotFound:
                 log.warning(
                     "Could not send reminder to user %d (DMs disabled or user not found).",
                     user_id,

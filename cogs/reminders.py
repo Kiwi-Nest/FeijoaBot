@@ -210,7 +210,7 @@ class Reminders(commands.Cog):
             else:
                 await channel.send(content, view=view)
 
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        except discord.NotFound, discord.Forbidden, discord.HTTPException:
             # Fallback to DM logic
             try:
                 user = self.bot.get_user(user_id) or await self.bot.fetch_user(user_id)

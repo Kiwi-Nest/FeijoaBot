@@ -234,7 +234,7 @@ class ServerManager:
                     msg,
                 )
 
-            password = self._read_rcon_password(server.path / "server.properties")
+            password = self._read_server_config(server.path).get("rcon_password", "")
             if not password:
                 msg = f"RCON password not found for '{server_name}'."
                 raise PropertiesError(msg)
@@ -246,7 +246,10 @@ class ServerManager:
                 password,
             ) as client:
                 response, _ = await client.send_cmd(command)
-                return response
+                # Filter out Velocity proxy string placeholders
+                lines = response.split("\n")
+                lines = [line for line in lines if not line.startswith("velocity.command.")]
+                return "\n".join(lines)
         except aiomcrcon.errors.RCONConnectionError as e:
             msg = f"Failed to connect to RCON on '{server_name}'."
             raise RCONConnectionError(
@@ -328,21 +331,25 @@ class ServerManager:
         except FileNotFoundError:
             return False
 
-        if not (server_path / "server.properties").is_file():
+        # Accept servers with EITHER config file
+        has_properties = (server_path / "server.properties").is_file()
+        has_velocity = (server_path / "plugins/velocityrcon/rcon.toml").is_file()
+        if not (has_properties or has_velocity):
             return False
 
         tmux_script = server_path / "tmux.sh"
         return tmux_script.is_file() and os.access(tmux_script, os.X_OK)
 
     async def _build_server_info(self, server_path: Path) -> ServerInfo | None:
-        """Parse config and checks the port to build a full ServerInfo object."""
+        """Parse config and check the port to build a full ServerInfo object."""
         name = server_path.name
         try:
-            props = self._parse_properties(server_path / "server.properties")
-            ip = props.get("server-ip", "127.0.0.1")
-            port = int(props.get("server-port", 0))
+            config = self._read_server_config(server_path)
+
+            ip = config.get("ip", "127.0.0.1")
+            port = int(config.get("port", "0"))
             if not port:
-                msg = "server-port is missing or invalid."
+                msg = "Port is missing or invalid."
                 raise PropertiesError(msg)
 
             is_online = await self._is_port_open(ip, port)
@@ -354,8 +361,8 @@ class ServerManager:
                 status=status,
                 ip=ip,
                 port=port,
-                rcon_enabled=props.get("enable-rcon", "false").lower() == "true",
-                rcon_port=int(props.get("rcon.port", 0)),
+                rcon_enabled=config.get("rcon_enabled", "false").lower() == "true",
+                rcon_port=int(config.get("rcon_port", "0")),
             )
         except (PropertiesError, ValueError) as e:
             log.warning("Could not load server '%s': %s", name, e)
@@ -402,13 +409,53 @@ class ServerManager:
                     props[key.strip()] = value.strip()
         return props
 
-    def _read_rcon_password(self, path: Path) -> str:
-        """Read the RCON password from a properties file."""
-        try:
-            props = self._parse_properties(path)
-            return props.get("rcon.password", "")
-        except PropertiesError:
-            return ""
+    def _parse_velocity_toml(self, path: Path) -> dict[str, str]:
+        """Parse Velocity's simple TOML-based RCON configuration.
+
+        Handles simple key = "value" pairs with quoted strings.
+        """
+        if not path.is_file():
+            msg = f"Velocity TOML file not found: {path}"
+            raise PropertiesError(msg)
+
+        props = {}
+        with path.open("r") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    key = key.strip()
+                    value = value.strip()
+                    if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
+                        value = value[1:-1]
+                    props[key] = value
+        return props
+
+    def _read_server_config(self, server_path: Path) -> dict[str, str]:
+        """Read and normalize server config from Velocity TOML or server.properties.
+
+        Returns dict with keys: ip, port, rcon_password, rcon_enabled, rcon_port.
+        """
+        velocity_toml = server_path / "plugins/velocityrcon/rcon.toml"
+
+        if velocity_toml.is_file():
+            config = self._parse_velocity_toml(velocity_toml)
+            return {
+                "ip": config.get("rcon-host", "127.0.0.1"),
+                "port": config.get("rcon-port", "0"),
+                "rcon_password": config.get("rcon-password", ""),
+                "rcon_enabled": "true",
+                "rcon_port": config.get("rcon-port", "0"),
+            }
+
+        props = self._parse_properties(server_path / "server.properties")
+        return {
+            "ip": props.get("server-ip", "127.0.0.1"),
+            "port": props.get("server-port", "0"),
+            "rcon_password": props.get("rcon.password", ""),
+            "rcon_enabled": props.get("enable-rcon", "false"),
+            "rcon_port": props.get("rcon.port", "0"),
+        }
 
     async def _is_port_open(self, host: str, port: int) -> bool:
         """Check if a TCP port is open and connectable."""
@@ -419,7 +466,7 @@ class ServerManager:
             )
             writer.close()
             await writer.wait_closed()
-        except (TimeoutError, ConnectionRefusedError, OSError):
+        except TimeoutError, ConnectionRefusedError, OSError:
             return False
         else:
             return True

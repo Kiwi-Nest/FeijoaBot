@@ -28,6 +28,44 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+class TranslateSelectView(discord.ui.View):
+    """Button view for selecting translation target language."""
+
+    def __init__(
+        self,
+        cog: AutoTranslate,
+        original_message: discord.Message,
+        timeout: float = 60,
+    ) -> None:
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.original_message = original_message
+
+    @discord.ui.button(label="English", emoji="🇬🇧", style=discord.ButtonStyle.secondary)
+    async def english(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await self.cog._perform_reactive_translation(interaction, self.original_message, target_lang="en", show_hint=True)
+
+    @discord.ui.button(label="Bulgarian", emoji="🇧🇬", style=discord.ButtonStyle.secondary)
+    async def bulgarian(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await self.cog._perform_reactive_translation(interaction, self.original_message, target_lang="bg", show_hint=True)
+
+    @discord.ui.button(label="Romanian", emoji="🇷🇴", style=discord.ButtonStyle.secondary)
+    async def romanian(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button,
+    ) -> None:
+        await self.cog._perform_reactive_translation(interaction, self.original_message, target_lang="ro", show_hint=True)
+
+
 class AutoTranslate(commands.Cog):
     """Cog for handling automatic and reaction-based translations."""
 
@@ -69,6 +107,17 @@ class AutoTranslate(commands.Cog):
         self.reaction_cache: OrderedDict[tuple[int, str], None] = OrderedDict()
         self.MAX_REACTION_CACHE_SIZE = 500
 
+        # Context menu must be created as a class instance in Cogs
+        self.translate_ctx_menu = app_commands.ContextMenu(
+            name="Translate",
+            callback=self.translate_message,
+        )
+        self.bot.tree.add_command(self.translate_ctx_menu)
+
+    async def cog_unload(self) -> None:
+        """Clean up when the cog is unloaded."""
+        self.bot.tree.remove_command(self.translate_ctx_menu.name, type=self.translate_ctx_menu.type)
+
     def _cache_msg_context(self, message_id: int, lang: str) -> None:
         """Cache the language context of a message for smart replies."""
         self.msg_context_cache[message_id] = lang
@@ -84,10 +133,10 @@ class AutoTranslate(commands.Cog):
     @app_commands.describe(lang="Your native language ('en' to disable).")
     @app_commands.choices(
         lang=[
-            app_commands.Choice(name="Server Default (Reset)", value="none"),
-            app_commands.Choice(name="Romanian 🇷🇴", value="ro"),
-            app_commands.Choice(name="Bulgarian 🇧🇬", value="bg"),
+            app_commands.Choice(name="Server Default (English)", value="none"),
             app_commands.Choice(name="English 🇬🇧", value="en"),
+            app_commands.Choice(name="Bulgarian 🇧🇬", value="bg"),
+            app_commands.Choice(name="Romanian 🇷🇴", value="ro"),
         ],
     )
     async def set_language(
@@ -105,22 +154,40 @@ class AutoTranslate(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
 
+        user_id = UserId(interaction.user.id)
+        guild_id = GuildId(interaction.guild.id)
+        user_key = (user_id, guild_id)
+
+        # Fetch server default language
+        guild_config = await self.config_db.get_guild_config(guild_id)
+        server_default = guild_config.default_language or "en"
+
         value = None if lang == "none" else lang
-        await self.user_db.set_native_language(
-            UserId(interaction.user.id),
-            GuildId(interaction.guild.id),
-            value,
-        )
+        await self.user_db.set_native_language(user_id, guild_id, value)
 
-        # Update cache
-        self.user_lang_cache[(UserId(interaction.user.id), GuildId(interaction.guild.id))] = value
+        # Smart auto-toggle: enable autotranslate if user language differs from server default
+        effective_lang = value or server_default
+        should_autotranslate = effective_lang != server_default
 
+        await self.user_db.set_autotranslate(user_id, guild_id, should_autotranslate)
+
+        # Update caches
+        self.user_lang_cache[user_key] = value
+        self.user_autotranslate_cache[user_key] = should_autotranslate
+
+        # Build response message
         if value:
-            await interaction.followup.send(
-                f"✅ Auto-translation set to **{value.upper()}**.",
-            )
+            if should_autotranslate:
+                msg = (
+                    f"✅ Language set to **{value.upper()}**. "
+                    f"Auto-translation is now **ON** (server language is {server_default.upper()})."
+                )
+            else:
+                msg = f"✅ Language set to **{value.upper()}**. Auto-translation is **OFF** since you speak the server language."
         else:
-            await interaction.followup.send("✅ Auto-translation reset to **Server Default**.")
+            msg = f"✅ Language reset to **Server Default ({server_default.upper()})**. Auto-translation is **OFF**."
+
+        await interaction.followup.send(msg)
 
     @app_commands.command(
         name="autotranslate",
@@ -160,6 +227,88 @@ class AutoTranslate(commands.Cog):
 
         state = "ENABLED" if is_enabled else "DISABLED"
         await interaction.followup.send(f"✅ Auto-translation is now **{state}**.")
+
+    async def translate_message(
+        self,
+        interaction: discord.Interaction,
+        message: discord.Message,
+    ) -> None:
+        """Translate a message on demand via right-click context menu."""
+        if not self.translator:
+            await interaction.response.send_message(
+                "Translation service is not available.",
+                ephemeral=True,
+            )
+            return
+
+        if not message.content:
+            await interaction.response.send_message(
+                "This message has no text to translate.",
+                ephemeral=True,
+            )
+            return
+
+        if not interaction.guild:
+            await interaction.response.send_message(
+                "This command can only be used in a server.",
+                ephemeral=True,
+            )
+            return
+
+        # Check if user has a language preference
+        user_lang = await self._get_user_native_language(
+            UserId(interaction.user.id),
+            GuildId(interaction.guild.id),
+        )
+
+        if user_lang:
+            # Translate directly to their preferred language
+            await self._perform_reactive_translation(interaction, message, target_lang=user_lang, show_hint=False)
+        else:
+            # Show language selection buttons
+            view = TranslateSelectView(
+                cog=self,
+                original_message=message,
+                timeout=60,
+            )
+            await interaction.response.send_message(
+                "Translate to which language?",
+                view=view,
+                ephemeral=True,
+            )
+
+    async def _perform_reactive_translation(
+        self,
+        interaction: discord.Interaction,
+        message: discord.Message,
+        target_lang: str,
+        *,
+        show_hint: bool = False,
+    ) -> None:
+        """Perform translation and respond/edit the ephemeral message."""
+        # Defer if not already responded
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
+        # Translate with auto-detect source language
+        translated = await self.translator.translate(
+            text=message.clean_content,
+            source="auto",
+            target=target_lang,
+            bypass_ignore=True,  # User explicitly asked, so translate even short text
+        )
+
+        if translated:
+            breadcrumb = self.translator.get_breadcrumb_string("??", target_lang)
+            response = f"{breadcrumb} {translated}"
+
+            # Add onboarding hint if user has no language preference
+            if show_hint:
+                response += "\n\n💡 **Tip:** Set your language with `/language` to get automatic translations."
+        else:
+            response = "Could not translate this message (it may already be in the target language)."
+
+        await interaction.edit_original_response(content=response, view=None)
 
     async def _get_user_native_language(
         self,
@@ -210,7 +359,7 @@ class AutoTranslate(commands.Cog):
             if message.reference.message_id in self.msg_context_cache:
                 return self.msg_context_cache[message.reference.message_id]
 
-        except (discord.NotFound, discord.HTTPException):
+        except discord.NotFound, discord.HTTPException:
             pass  # Reference invalid or inaccessible
 
         return None
@@ -324,7 +473,7 @@ class AutoTranslate(commands.Cog):
 
         try:
             message = await channel.fetch_message(payload.message_id)
-        except (discord.NotFound, discord.Forbidden):
+        except discord.NotFound, discord.Forbidden:
             return
 
         # Ignore empty or bots

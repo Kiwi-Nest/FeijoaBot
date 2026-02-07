@@ -6,9 +6,8 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, ClassVar, Final
 
 import discord
-from blackjack21 import Card, Dealer, Deck, GameState, Player, Table
-from blackjack21 import GameResult as LibGameResult  # Rename to avoid conflict
-from blackjack21.deck import DEFAULT_RANKS  # We need this for the Deck
+from blackjack21 import DEFAULT_SUITS, Action, Card, Dealer, Deck, GameState, Player, Table
+from blackjack21 import GameResult as LibGameResult
 from blackjack21.exceptions import InvalidActionError, PlayFailure
 from discord import app_commands
 from discord.ext import commands
@@ -26,8 +25,6 @@ if TYPE_CHECKING:
     from modules.UserDB import UserDB
 
 SECOND_COOLDOWN: Final[int] = 1
-
-DEFAULT_SUITS: Final[tuple[str, ...]] = ("Hearts", "Diamonds", "Spades", "Clubs")
 
 
 # This enum is for mapping results to payouts
@@ -100,7 +97,7 @@ class BlackjackView(discord.ui.View):
         self.last_action: str | None = None
 
         # Using 6 decks is common in casinos.
-        deck = Deck(suits=DEFAULT_SUITS, ranks=DEFAULT_RANKS, count=6)
+        deck = Deck(suits=DEFAULT_SUITS, count=6)
 
         self.table = Table(players=[(user.display_name, bet)], deck=deck)
         self.player: Player = self.table.players[0]
@@ -116,7 +113,7 @@ class BlackjackView(discord.ui.View):
             self.stop()
             return
 
-        if self.table._state == GameState.ROUND_OVER:
+        if self.table.state == GameState.ROUND_OVER:
             # Run _end_game to parse results
             asyncio.create_task(self._end_game())  # noqa: RUF006
         else:
@@ -143,27 +140,21 @@ class BlackjackView(discord.ui.View):
         """Clear and adds buttons based on the current game state."""
         self.clear_items()
 
-        if self.table._state == GameState.ROUND_OVER:  # Game is over
+        if self.table.state == GameState.ROUND_OVER:
             self.add_item(PlayAgainButton(self.initial_bet))
             self.add_item(NewBetButton())
-        elif self.table._state == GameState.PLAYERS_TURN:  # Player's turn
-            self.add_item(HitButton())
-            self.add_item(StandButton())
-
-            current_hand = self.table.current_hand
-            if current_hand:
-                player = current_hand.player
-                # Can only double, split, or surrender on the first 2 cards
-                if len(current_hand.hand) == 2:
-                    self.add_item(DoubleDownButton())
-
-                    # Can only surrender if not split
-                    if len(player.hands) == 1:
-                        self.add_item(SurrenderButton())
-
-                    # Check if cards have the same value
-                    if current_hand.hand[0].value == current_hand.hand[1].value:
-                        self.add_item(SplitButton())
+        elif self.table.state == GameState.PLAYERS_TURN:
+            actions = self.table.available_actions()
+            if Action.HIT in actions:
+                self.add_item(HitButton())
+            if Action.STAND in actions:
+                self.add_item(StandButton())
+            if Action.DOUBLE in actions:
+                self.add_item(DoubleDownButton())
+            if Action.SURRENDER in actions:
+                self.add_item(SurrenderButton())
+            if Action.SPLIT in actions:
+                self.add_item(SplitButton())
 
     def disable_all_buttons(self, is_disabled: bool = True) -> None:
         """Disables or enables all buttons in the view."""
@@ -318,7 +309,7 @@ class BlackjackView(discord.ui.View):
 
     # --- Embed Creation ---
     def create_embed(self) -> discord.Embed:
-        is_game_over = self.table._state == GameState.ROUND_OVER
+        is_game_over = self.table.state == GameState.ROUND_OVER
 
         color = discord.Colour.blue()  # Default for ongoing game
         if is_game_over and self.outcome_message:
@@ -337,7 +328,7 @@ class BlackjackView(discord.ui.View):
 
         # We use table.dealer_visible_hand, which already handles hiding cards.
         dealer_hand = self.table.dealer_visible_hand
-        dealer_hand_str = format_hand(dealer_hand)  # Use new, simpler format_hand
+        dealer_hand_str = format_hand(dealer_hand)
 
         # Get the correct total to display
         dealer_hand_val: int | str
@@ -365,7 +356,7 @@ class BlackjackView(discord.ui.View):
 
             embed.add_field(
                 name=f"{active_marker}{hand_name} (Bet: ${hand.bet:,})",
-                value=f"{format_hand(hand.hand)}\n**Total: {hand.total}**",  # format_hand no longer needs a bool
+                value=f"{format_hand(list(hand))}\n**Total: {hand.total}**",
             )
 
         if self.outcome_message:
@@ -404,7 +395,7 @@ class HitButton(discord.ui.Button["BlackjackView"]):
             await interaction.response.send_message(f"Error: {e}", ephemeral=True)
             return
 
-        if view.table._state == GameState.ROUND_OVER:  # Check for ROUND_OVER
+        if view.table.state == GameState.ROUND_OVER:  # Check for ROUND_OVER
             await view._handle_stand_or_dd(interaction)
         else:
             # Still player's turn
@@ -429,7 +420,7 @@ class StandButton(discord.ui.Button["BlackjackView"]):
             await interaction.response.send_message(f"Error: {e}", ephemeral=True)
             return
 
-        if view.table._state == GameState.ROUND_OVER:  # Check for ROUND_OVER
+        if view.table.state == GameState.ROUND_OVER:  # Check for ROUND_OVER
             await view._handle_stand_or_dd(interaction)
         else:
             # Still player's turn (this 'else' is only hit if a player stands
@@ -471,7 +462,7 @@ class DoubleDownButton(discord.ui.Button["BlackjackView"]):
             await interaction.response.send_message(f"Error: {e}", ephemeral=True)
             return
 
-        if view.table._state == GameState.ROUND_OVER:  # Check for ROUND_OVER
+        if view.table.state == GameState.ROUND_OVER:  # Check for ROUND_OVER
             await view._handle_stand_or_dd(interaction)
         else:
             # Still player's turn (e.g., doubled on first split hand)
@@ -502,7 +493,7 @@ class SplitButton(discord.ui.Button["BlackjackView"]):
             view.table.split()
             view.last_action = "You split your hand!"
 
-            if view.table._state == GameState.ROUND_OVER:
+            if view.table.state == GameState.ROUND_OVER:
                 # This happens if you split Aces
                 await view._handle_stand_or_dd(interaction)
             else:
@@ -530,7 +521,7 @@ class SurrenderButton(discord.ui.Button["BlackjackView"]):
             return
 
         # or ends the turn. The result is calculated in _end_game
-        if view.table._state == GameState.ROUND_OVER:  # Check for ROUND_OVER
+        if view.table.state == GameState.ROUND_OVER:  # Check for ROUND_OVER
             await view._handle_stand_or_dd(interaction)
         else:
             # Still player's turn (e.g., surrendered first split hand)
@@ -591,8 +582,8 @@ class PlayAgainButton(discord.ui.Button["BlackjackView"]):
         view.player = view.table.players[0]
 
         # Check for instant blackjack again
-        if view.table._state == GameState.ROUND_OVER:
-            view._end_game()
+        if view.table.state == GameState.ROUND_OVER:
+            await view._end_game()
         else:
             view._update_buttons()
 
@@ -653,7 +644,7 @@ class BlackjackCog(GuildOnlyHybridCog):
         name="blackjack",
         description="Start a game of Blackjack.",
     )
-    @commands.cooldown(1, SECOND_COOLDOWN * 10, commands.BucketType.user)
+    @commands.cooldown(1, SECOND_COOLDOWN * 5, commands.BucketType.user)
     @app_commands.describe(bet="The amount of credits you want to bet.")
     async def blackjack(
         self,

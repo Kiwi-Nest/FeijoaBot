@@ -75,7 +75,7 @@ def _parse_api_time(time_str: str) -> datetime.timedelta | None:
 
         # Create a timedelta directly from the duration components
         return datetime.timedelta(hours=hours, minutes=minutes, seconds=seconds)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         # This catches format mismatches or non-integer parts
         log.warning("Could not parse API time string: %s", time_str)
         return None

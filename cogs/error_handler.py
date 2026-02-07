@@ -46,7 +46,7 @@ class ErrorHandler(commands.Cog):
         original_error = getattr(error, "original", error)
 
         # Check for UserError first (custom exceptions)
-        if isinstance(original_error, UserError):
+        if isinstance(original_error, (UserError, app_errors.TransformerError)):
             await ctx.send(f"❌ {original_error}")
             return
 

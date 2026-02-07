@@ -45,7 +45,7 @@ class ForwardCog(commands.Cog):
                 try:
                     # Fallback to fetching if not in cache
                     target_channel = await self.bot.fetch_channel(config.qotd_target_channel_id)
-                except (discord.NotFound, discord.Forbidden):
+                except discord.NotFound, discord.Forbidden:
                     log.warning(
                         "Could not find or fetch qotd_target_channel_id %s for guild %s",
                         config.qotd_target_channel_id,

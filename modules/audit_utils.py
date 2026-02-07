@@ -251,7 +251,7 @@ async def check_webhooks(guild: discord.Guild) -> AuditResult:
                 # Cache miss - try fetching from API to verify they actually left
                 try:
                     member = await guild.fetch_member(creator.id)
-                except (discord.NotFound, discord.HTTPException):
+                except discord.NotFound, discord.HTTPException:
                     # Member truly not in server
                     results.append(
                         AuditIssue(

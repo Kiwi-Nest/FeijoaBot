@@ -94,7 +94,7 @@ class Moderate(
             # interaction.data['options'][0] is the subcommand (e.g., 'ban', 'kick')
             subcommand_data = interaction.data["options"][0]
             options = subcommand_data.get("options", [])
-        except (IndexError, KeyError, AttributeError):
+        except IndexError, KeyError, AttributeError:
             log.warning(
                 "Could not find subcommand options in interaction_check: %s",
                 interaction.data.get("name"),

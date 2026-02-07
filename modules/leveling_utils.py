@@ -50,7 +50,7 @@ class LevelBotProtocol(asyncio.DatagramProtocol):
             user_id = UserId(int(data.decode().strip()))
             # Schedule the coroutine to run on the bot's event loop
             asyncio.create_task(self.cog.grant_udp_xp(user_id))  # noqa: RUF006
-        except (ValueError, UnicodeDecodeError):
+        except ValueError, UnicodeDecodeError:
             log.warning("Received invalid UDP data: %s from %s", data, addr)
 
     def error_received(self, exc: Exception) -> None:

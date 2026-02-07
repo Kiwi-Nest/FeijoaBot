@@ -142,7 +142,7 @@ class BumpHandlerCog(commands.Cog):
                 delay_seconds,
             )
 
-        except (discord.HTTPException, discord.Forbidden):
+        except discord.HTTPException, discord.Forbidden:
             log.exception("Error processing bump message %s.", message.id)
 
     async def _schedule_reminder(
@@ -273,7 +273,7 @@ class BumpHandlerCog(commands.Cog):
                             latest_bump_message = message
                         # Since history is newest-first, we can stop after finding the first one.
                         break
-            except (discord.Forbidden, discord.HTTPException):
+            except discord.Forbidden, discord.HTTPException:
                 continue
         return latest_bump_message
 

@@ -110,7 +110,7 @@ class KiwiBot(commands.Bot):
                             guild_id,
                             [i.name for i in synced_guild],
                         )
-                except (HTTPException, CommandSyncFailure, Forbidden):
+                except HTTPException, CommandSyncFailure, Forbidden:
                     log.exception(
                         "Error syncing guild commands for guild %d",
                         guild_id,
@@ -154,6 +154,11 @@ class KiwiBot(commands.Bot):
                     try:
                         await self.load_extension(f"cogs.{file.stem}")
                         log.info("Loaded %s", file.stem)
+                    except ImportError, ModuleNotFoundError:
+                        log.exception(
+                            "Failed to load dependencies for extension 'cogs.%s'.",
+                            file.stem,
+                        )
                     except (
                         ExtensionNotFound,
                         ExtensionAlreadyLoaded,

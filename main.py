@@ -69,7 +69,7 @@ try:
 
     bot.run(config.token)
 
-except (KeyError, ValueError):
+except KeyError, ValueError:
     log.exception(
         "A critical configuration error occurred. Please check your environment variables.",
     )

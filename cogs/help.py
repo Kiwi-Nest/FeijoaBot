@@ -42,7 +42,7 @@ class Help(commands.Cog):
                     guild_commands = await self.bot.tree.fetch_commands(guild=guild)
                     for cmd in guild_commands:
                         server_by_name[cmd.name] = cmd
-                except (discord.HTTPException, discord.Forbidden):
+                except discord.HTTPException, discord.Forbidden:
                     log.warning(f"Failed to fetch commands for guild {guild.id} ({guild.name})")
 
         new_command_list: dict[str, FeijoaCommand] = {}
