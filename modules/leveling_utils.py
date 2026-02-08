@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+import struct
 from typing import TYPE_CHECKING
 
 from modules.dtypes import NonNegativeInt, UserId
@@ -43,11 +44,11 @@ class LevelBotProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         """Process received data and grant XP."""
         try:
-            if addr[0] != "127.0.0.1" and not addr[0].startswith("10.0.0."):
+            if addr[0] != "127.0.0.1" and not addr[0].startswith("10.0.0.") and len(data) != 8:  # User ID is 8 bytes wide
                 log.warning("Found data from unprivileged client %s", addr)
                 raise ValueError
 
-            user_id = UserId(int(data.decode().strip()))
+            user_id = UserId(int(struct.unpack('>Q', data)[0]))
             # Schedule the coroutine to run on the bot's event loop
             asyncio.create_task(self.cog.grant_udp_xp(user_id))  # noqa: RUF006
         except ValueError, UnicodeDecodeError:
