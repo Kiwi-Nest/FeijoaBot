@@ -48,7 +48,7 @@ class LevelBotProtocol(asyncio.DatagramProtocol):
                 log.warning("Found data from unprivileged client %s", addr)
                 raise ValueError
 
-            user_id = UserId(int(struct.unpack('>Q', data)[0]))
+            user_id = UserId(int(struct.unpack(">Q", data)[0]))
             # Schedule the coroutine to run on the bot's event loop
             asyncio.create_task(self.cog.grant_udp_xp(user_id))  # noqa: RUF006
         except ValueError, UnicodeDecodeError:

@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Populate the environment variables then run this to populate counts.json."""
-from __future__ import annotations
 
 import csv
 import json
@@ -9,9 +8,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from zoneinfo import ZoneInfo
 
 import requests
-from zoneinfo import ZoneInfo
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -73,7 +72,7 @@ def fetch_all_messages(session: requests.Session) -> MessageList:
 
 def parse_member_events(
     messages: MessageList,
-) -> Generator[tuple[datetime, int], None, None]:
+) -> Generator[tuple[datetime, int]]:
     """Parse messages to extract member count data points, oldest to newest."""
     count = 0
     tz = ZoneInfo(TARGET_TIMEZONE)
@@ -97,7 +96,7 @@ def parse_member_events(
                     line = suffix.split("\n", 1)[0]
                     count = int("".join(c for c in line if c.isdigit()))
                 yield (date, count)
-            except (ValueError, IndexError):
+            except ValueError, IndexError:
                 continue  # Skip malformed embeds
 
         elif "member left" in title.lower() and count > 0:
