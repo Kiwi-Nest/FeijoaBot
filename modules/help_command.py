@@ -121,11 +121,11 @@ class FeijoaCommand:
             ],
         )
 
-    def can_be_executed_by(self, user_perms: Permissions):
+    def can_be_executed_by(self, user_perms: Permissions) -> bool:
         if self.permissions == 0:
             return True
 
-        return self.permissions & user_perms.value
+        return bool(self.permissions & user_perms.value)
 
     def is_staff(self) -> bool:
         if not self.permissions:

@@ -80,7 +80,7 @@ class JoinLeaveLogCog(commands.Cog):
         except discord.HTTPException:
             log.exception("Failed to send message to join/leave log channel")
 
-    async def _autovalidate_member(
+    async def _autovalidate_member(  # noqa: PLR0912 - Security validation requires multiple indicator checks
         self,
         verified_role_id: RoleId,
         member: discord.Member,

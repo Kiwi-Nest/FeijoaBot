@@ -23,7 +23,7 @@ class Help(commands.Cog):
         self.refresh_command_list.start()
 
     @tasks.loop(minutes=10)
-    async def refresh_command_list(self) -> None:
+    async def refresh_command_list(self) -> None:  # noqa: PLR0912 - Command fetching requires multiple type checks and error handling
         log.info("Command list is being refreshed...")
 
         local_command_list = self.bot.tree.get_commands()
@@ -43,7 +43,7 @@ class Help(commands.Cog):
                     for cmd in guild_commands:
                         server_by_name[cmd.name] = cmd
                 except discord.HTTPException, discord.Forbidden:
-                    log.warning(f"Failed to fetch commands for guild {guild.id} ({guild.name})")
+                    log.warning("Failed to fetch commands for guild %s (%s)", guild.id, guild.name)
 
         new_command_list: dict[str, FeijoaCommand] = {}
 
@@ -103,8 +103,8 @@ class Help(commands.Cog):
         if not command:  # Show generic command list
             embed.colour = discord.Color.green()
             command_list_str = ""
-            for command_name, command in self.command_list.items():
-                if not command.can_be_executed_by(interaction.permissions):
+            for command_name, cmd in self.command_list.items():
+                if not cmd.can_be_executed_by(interaction.permissions):
                     continue
 
                 command_list_str += f"- /{command_name}\n"
@@ -125,7 +125,8 @@ class Help(commands.Cog):
                         f"Command: `{requested_cmd.name}`",
                         f"Description: `{requested_cmd.description}`",
                         f"Is Staff-Only: `{requested_cmd.is_staff()}`",
-                        f"[Required Permissions](<https://discord.com/developers/docs/topics/permissions>): `{requested_cmd.permissions}`",
+                        f"[Required Permissions](<https://discord.com/developers/docs/topics/permissions>): "
+                        f"`{requested_cmd.permissions}`",
                     ],
                 ),
             )

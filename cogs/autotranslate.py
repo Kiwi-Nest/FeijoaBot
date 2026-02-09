@@ -45,7 +45,7 @@ class TranslateSelectView(discord.ui.View):
     async def english(
         self,
         interaction: discord.Interaction,
-        button: discord.ui.Button,
+        _button: discord.ui.Button,
     ) -> None:
         await self.cog._perform_reactive_translation(interaction, self.original_message, target_lang="en", show_hint=True)
 
@@ -53,7 +53,7 @@ class TranslateSelectView(discord.ui.View):
     async def bulgarian(
         self,
         interaction: discord.Interaction,
-        button: discord.ui.Button,
+        _button: discord.ui.Button,
     ) -> None:
         await self.cog._perform_reactive_translation(interaction, self.original_message, target_lang="bg", show_hint=True)
 
@@ -61,7 +61,7 @@ class TranslateSelectView(discord.ui.View):
     async def romanian(
         self,
         interaction: discord.Interaction,
-        button: discord.ui.Button,
+        _button: discord.ui.Button,
     ) -> None:
         await self.cog._perform_reactive_translation(interaction, self.original_message, target_lang="ro", show_hint=True)
 
