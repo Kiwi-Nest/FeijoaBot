@@ -40,9 +40,8 @@ class ServerStats(GuildOnlyHybridCog):
         # 1. Fetch the configuration for this specific guild
         config = await self.config_db.get_guild_config(GuildId(guild.id))
 
-        # 2. Get channel and role objects from the config IDs
+        # 2. Get channel objects from the config IDs
         member_channel = guild.get_channel(config.member_count_channel_id) if config.member_count_channel_id else None
-        tag_role = guild.get_role(config.tag_role_id) if config.tag_role_id else None
         tag_channel = guild.get_channel(config.tag_role_channel_id) if config.tag_role_channel_id else None
 
         # 3. Update Member Count Channel
@@ -77,9 +76,16 @@ class ServerStats(GuildOnlyHybridCog):
                 except discord.HTTPException:
                     log.exception("Failed to update member count for guild %s", guild.name)
 
-        # 4. Update Tag Role Count Channel
-        if isinstance(tag_channel, discord.VoiceChannel) and tag_role and tag_channel:
-            tag_members_count = len(tag_role.members)
+        # 4. Update Tag Server Count Channel (members with primary guild tag)
+        if isinstance(tag_channel, discord.VoiceChannel) and tag_channel:
+            # Count members who have this guild set as their primary guild with a tag
+            tag_members_count = len(
+                [
+                    m
+                    for m in guild.members
+                    if not m.bot and m.primary_guild and m.primary_guild.id == guild.id and m.primary_guild.tag
+                ],
+            )
             new_name = f"Tag Users: {tag_members_count}"
             if tag_channel.name != new_name:
                 try:
