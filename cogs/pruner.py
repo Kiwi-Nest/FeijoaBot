@@ -41,7 +41,7 @@ class PrunerCog(commands.Cog):
         if not leveling_cog:
             log.error(
                 "Prune loop cannot run because the LevelingCog is not loaded. "
-                "This is a safety measure to prevent accidental pruning of all members.",
+                "This is a safety measure to prevent accidental role pruning of all members.",
             )
             return
 
