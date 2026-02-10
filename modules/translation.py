@@ -74,7 +74,7 @@ class TranslationClient:
             "q": clean_text,
             "source": source,
             "target": target,
-            "format": "text",
+            "format": "html",
         }
 
         try:

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import re
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
@@ -106,6 +107,13 @@ class AutoTranslate(commands.Cog):
         # (message_id, target_lang) -> None (Simple LRU for reaction spam prevention)
         self.reaction_cache: OrderedDict[tuple[int, str], None] = OrderedDict()
         self.MAX_REACTION_CACHE_SIZE = 500
+
+        # Patterns for cleanup
+        self.mentionable_pattern = re.compile(r"<(?:#|@&?)\d{18,20}>")
+        self.emoji_pattern = re.compile(r"<:[a-zA-Z0-9_-]{2,32}:(\d{18,20})>")
+        self.url_pattern = re.compile(r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)")
+
+        self.placeholder_check_pattern = re.compile(r"<span translate=\"no\">(%[emu])</span>")
 
         # Context menu must be created as a class instance in Cogs
         self.translate_ctx_menu = app_commands.ContextMenu(
@@ -277,6 +285,46 @@ class AutoTranslate(commands.Cog):
                 ephemeral=True,
             )
 
+    async def _unwanted_aware_translate(
+        self,
+        text: str,
+        *,
+        target: str,
+        source: str = "auto",
+        bypass_ignore: bool = False
+    ) -> str | None:
+        urls: list[str] = []
+        emojis: list[str] = []
+        mentionables: list[str] = []
+
+        text = re.sub(self.mentionable_pattern, lambda m: (mentionables.append(m.group(0)), "<span translate=\"no\">%m</span>")[1], text)
+        text = re.sub(self.emoji_pattern, lambda m: (emojis.append(m.group(0)), "<span translate=\"no\">%e</span>")[1], text)
+        text = re.sub(self.url_pattern, lambda m: (urls.append(m.group(0)), "<span translate=\"no\">%u</span>")[1], text)
+
+        # Check if string is made up only from those untranslatable entries, if it is, skip
+        if not re.sub(self.placeholder_check_pattern, "", text):
+            return None
+
+        def desubstitute(regex_match: re.Match[str]) -> str:
+            match regex_match.group(1):
+                case "%u": return urls.pop(0)
+                case "%e": return emojis.pop(0)
+                case "%m": return mentionables.pop(0)
+
+            return ""  # Can't happen
+
+        translated = await self.translator.translate(
+            text=text,
+            source=source,
+            target=target,
+            bypass_ignore=bypass_ignore,
+        )
+
+        if translated:
+            translated = re.sub(self.placeholder_check_pattern, desubstitute, translated)
+
+        return translated
+
     async def _perform_reactive_translation(
         self,
         interaction: discord.Interaction,
@@ -290,15 +338,8 @@ class AutoTranslate(commands.Cog):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
 
-        # Translate with auto-detect source language
-        translated = await self.translator.translate(
-            text=message.clean_content,
-            source="auto",
-            target=target_lang,
-            bypass_ignore=True,  # User explicitly asked, so translate even short text
-        )
-
-        if translated:
+        # Translate
+        if translated := await self._unwanted_aware_translate(message.content, target=target_lang, bypass_ignore=True):  # User explicitly asked, so translate even short text
             breadcrumb = self.translator.get_breadcrumb_string("??", target_lang)
             response = f"{breadcrumb} {translated}"
 
@@ -425,13 +466,7 @@ class AutoTranslate(commands.Cog):
         source_lang, target_lang = context
 
         # Perform Translation
-        translation = await self.translator.translate(
-            message.clean_content,
-            source=source_lang,
-            target=target_lang,
-        )
-
-        if translation:
+        if translation := await self._unwanted_aware_translate(message.content, source=source_lang, target=target_lang):
             crumb = self.translator.get_breadcrumb_string(
                 source_lang,
                 target_lang,
@@ -506,14 +541,7 @@ class AutoTranslate(commands.Cog):
             return
 
         # Translate
-        translation = await self.translator.translate(
-            message.clean_content,
-            source=source_lang,
-            target=target_lang,
-            bypass_ignore=True,  # Explicit request, ignore length checks
-        )
-
-        if translation:
+        if translation := await self._unwanted_aware_translate(message.content, source=source_lang, target=target_lang, bypass_ignore=True):  # Explicit request, ignore length checks
             # Update cache
             self.reaction_cache[reaction_key] = None
             if len(self.reaction_cache) > self.MAX_REACTION_CACHE_SIZE:
