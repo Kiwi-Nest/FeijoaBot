@@ -111,7 +111,9 @@ class AutoTranslate(commands.Cog):
         # Patterns for cleanup
         self.mentionable_pattern = re.compile(r"<(?:#|@&?)\d{18,20}>")
         self.emoji_pattern = re.compile(r"<:[a-zA-Z0-9_-]{2,32}:(\d{18,20})>")
-        self.url_pattern = re.compile(r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)")
+        self.url_pattern = re.compile(
+            r"https?:\/\/(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)",
+        )
 
         self.placeholder_check_pattern = re.compile(r"<span translate=\"no\">(%[emu])</span>")
 
@@ -291,15 +293,19 @@ class AutoTranslate(commands.Cog):
         *,
         target: str,
         source: str = "auto",
-        bypass_ignore: bool = False
+        bypass_ignore: bool = False,
     ) -> str | None:
         urls: list[str] = []
         emojis: list[str] = []
         mentionables: list[str] = []
 
-        text = re.sub(self.mentionable_pattern, lambda m: (mentionables.append(m.group(0)), "<span translate=\"no\">%m</span>")[1], text)
-        text = re.sub(self.emoji_pattern, lambda m: (emojis.append(m.group(0)), "<span translate=\"no\">%e</span>")[1], text)
-        text = re.sub(self.url_pattern, lambda m: (urls.append(m.group(0)), "<span translate=\"no\">%u</span>")[1], text)
+        text = re.sub(
+            self.mentionable_pattern,
+            lambda m: (mentionables.append(m.group(0)), '<span translate="no">%m</span>')[1],
+            text,
+        )
+        text = re.sub(self.emoji_pattern, lambda m: (emojis.append(m.group(0)), '<span translate="no">%e</span>')[1], text)
+        text = re.sub(self.url_pattern, lambda m: (urls.append(m.group(0)), '<span translate="no">%u</span>')[1], text)
 
         # Check if string is made up only from those untranslatable entries, if it is, skip
         if not re.sub(self.placeholder_check_pattern, "", text):
@@ -307,9 +313,12 @@ class AutoTranslate(commands.Cog):
 
         def desubstitute(regex_match: re.Match[str]) -> str:
             match regex_match.group(1):
-                case "%u": return urls.pop(0)
-                case "%e": return emojis.pop(0)
-                case "%m": return mentionables.pop(0)
+                case "%u":
+                    return urls.pop(0)
+                case "%e":
+                    return emojis.pop(0)
+                case "%m":
+                    return mentionables.pop(0)
 
             return ""  # Can't happen
 
@@ -339,7 +348,11 @@ class AutoTranslate(commands.Cog):
             await interaction.response.defer(ephemeral=True)
 
         # Translate
-        if translated := await self._unwanted_aware_translate(message.content, target=target_lang, bypass_ignore=True):  # User explicitly asked, so translate even short text
+        if translated := await self._unwanted_aware_translate(
+            message.content,
+            target=target_lang,
+            bypass_ignore=True,
+        ):  # User explicitly asked, so translate even short text
             breadcrumb = self.translator.get_breadcrumb_string("??", target_lang)
             response = f"{breadcrumb} {translated}"
 
@@ -541,7 +554,12 @@ class AutoTranslate(commands.Cog):
             return
 
         # Translate
-        if translation := await self._unwanted_aware_translate(message.content, source=source_lang, target=target_lang, bypass_ignore=True):  # Explicit request, ignore length checks
+        if translation := await self._unwanted_aware_translate(
+            message.content,
+            source=source_lang,
+            target=target_lang,
+            bypass_ignore=True,
+        ):  # Explicit request, ignore length checks
             # Update cache
             self.reaction_cache[reaction_key] = None
             if len(self.reaction_cache) > self.MAX_REACTION_CACHE_SIZE:
