@@ -23,9 +23,6 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# UDP Server Configuration
-UDP_HOST: Final[str] = "127.0.0.1"
-
 # --- Constants ---
 COOLDOWN_SECONDS: Final[int] = 5 * 60
 LONG_ABSENCE_BONUS_HOURS: Final[int] = 6
@@ -42,6 +39,7 @@ class LevelingCog(GuildOnlyHybridCog):
         self,
         bot: KiwiBot,
         *,
+        host: str | None,
         udp_port: int | None,
         privileged_guild_id: (GuildId | None),  # Special case for UDP, keep this global guild ID
         user_db: UserDB,
@@ -52,6 +50,7 @@ class LevelingCog(GuildOnlyHybridCog):
         self.config_db = config_db
         self.last_activity_timestamps: dict[UserGuildPair, float] = {}
         self.udp_transport: asyncio.DatagramTransport | None = None
+        self.host = host
         self.udp_port = udp_port
         self.privileged_guild_id = privileged_guild_id  # For UDP special case
 
@@ -105,9 +104,9 @@ class LevelingCog(GuildOnlyHybridCog):
         try:
             self.udp_transport, _ = await loop.create_datagram_endpoint(
                 lambda: LevelBotProtocol(self),
-                local_addr=(UDP_HOST, self.udp_port),
+                local_addr=(self.host, self.udp_port),
             )
-            log.info("Leveling UDP server started on %s:%d.", UDP_HOST, self.udp_port)
+            log.info("Leveling UDP server started on %s:%d.", self.host, self.udp_port)
         except OSError:
             log.exception("Failed to start leveling UDP server")
 
@@ -237,10 +236,11 @@ class LevelingCog(GuildOnlyHybridCog):
             return
 
         guild = self.bot.get_guild(self.privileged_guild_id)
-        if not guild or not guild.get_member(user_id):
-            # Don't grant XP if the user isn't in the specified server
+        if not guild or not (member := guild.get_member(user_id)):
+            log.warning("Got invalid user ID from UDP: %s", user_id)
             return
 
+        log.info("Got a request to add XP to %s (%s) via UDP.", member.name, user_id)
         xp_to_add = self._get_addable_xp(UserId(user_id), self.privileged_guild_id)
         if xp_to_add > 0:
             await self._grant_xp(UserId(user_id), self.privileged_guild_id, "udp", PositiveInt(xp_to_add))
@@ -429,6 +429,7 @@ async def setup(bot: KiwiBot) -> None:
     await bot.add_cog(
         LevelingCog(
             bot=bot,
+            host=bot.config.host,
             udp_port=bot.config.udp_port,  # UDP port is a global bot setting
             privileged_guild_id=bot.config.guild_id,  # Special case for UDP, still uses global guild_id
             user_db=bot.user_db,

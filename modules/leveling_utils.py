@@ -44,7 +44,7 @@ class LevelBotProtocol(asyncio.DatagramProtocol):
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         """Process received data and grant XP."""
         try:
-            if addr[0] != "127.0.0.1" and not addr[0].startswith("10.0.0.") and len(data) != 8:  # User ID is 8 bytes wide
+            if not ((addr[0] == "127.0.0.1" or addr[0].startswith("10.0.0.")) and len(data) == 8):  # User ID is 8 bytes wide
                 log.warning("Found data from unprivileged client %s", addr)
                 raise ValueError
 

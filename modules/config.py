@@ -18,6 +18,7 @@ class BotConfig:
     # Special case for leveling system which may operate on a privileged guild
     guild_id: GuildId | None
     swl_guild_id: GuildId | None
+    host: str | None
     udp_port: int | None
     mc_guild_id: GuildId | None
     game_admin_log_channel_id: ChannelId | None
@@ -67,6 +68,7 @@ class BotConfig:
             # Optional guild features
             guild_id=(GuildId(val) if (val := get_env_int("UDP_GUILD_ID", required=False)) else None),
             swl_guild_id=(GuildId(val) if (val := get_env_int("SWL_GUILD_ID", required=False)) else None),
+            host=os.getenv("HOST"),
             udp_port=get_env_int("UDP_PORT", required=False),
             # Game Admin cog settings
             mc_guild_id=(GuildId(val) if (val := get_env_int("MC_GUILD_ID", required=False)) else None),
