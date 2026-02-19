@@ -3,9 +3,12 @@ import ipaddress
 import logging
 import math
 import struct
+from typing import TYPE_CHECKING
 
-from cogs.leveling import LevelingCog
 from modules.dtypes import NonNegativeInt, UserId
+
+if TYPE_CHECKING:
+    from cogs.leveling import LevelingCog
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ def to_next_level(xp: NonNegativeInt) -> NonNegativeInt:
 class LevelBotProtocol(asyncio.DatagramProtocol):
     """Handle incoming UDP packets for the leveling system."""
 
-    def __init__(self, cog_instance: LevelingCog) -> None:
+    def __init__(self, cog_instance: "LevelingCog") -> None:
         self.cog = cog_instance
         super().__init__()
 

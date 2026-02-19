@@ -22,7 +22,6 @@ from modules.ReminderDB import ReminderDB
 from modules.UserDB import UserDB
 
 if TYPE_CHECKING:
-
     with contextlib.suppress(ImportError):
         pass
 

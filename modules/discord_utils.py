@@ -1,4 +1,3 @@
-
 import discord
 
 from modules.dtypes import GuildId
