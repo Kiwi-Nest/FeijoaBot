@@ -25,6 +25,11 @@ class BotConfig:
     servers_path: Path | None
     twelvedata_api_key: str | None
     libretranslate_host: str | None
+    tzbot_host: str | None
+    tzbot_port: int | None
+    tzbot_api_key: str | None
+    tzbot_encryption_key: str | None
+
 
     @classmethod
     def from_environment(cls) -> Self:
@@ -78,4 +83,8 @@ class BotConfig:
             servers_path=get_path("SERVERS_PATH"),
             twelvedata_api_key=os.getenv("TWELVEDATA_API_KEY"),
             libretranslate_host=os.getenv("LIBRETRANSLATE_HOST", "http://localhost:5000"),
+            tzbot_host=os.getenv("TZBOT_HOST"),
+            tzbot_port=get_env_int("TZBOT_PORT", required=False),
+            tzbot_api_key=os.getenv("TZBOT_API_KEY"),
+            tzbot_encryption_key=os.getenv("TZBOT_ENCRYPTION_KEY"),
         )

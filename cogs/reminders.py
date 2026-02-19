@@ -8,6 +8,7 @@ import contextlib
 import logging
 import re
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import TYPE_CHECKING
 
 import discord
@@ -18,11 +19,14 @@ from discord.ext import commands
 from modules.dtypes import ChannelId, GuildId, MessageId, UserId
 
 if TYPE_CHECKING:
-    from zoneinfo import ZoneInfo
-
     from modules.KiwiBot import KiwiBot
     from modules.ReminderDB import ReminderDB
     from modules.UserDB import UserDB
+
+    try:
+        from tzbot4py import TZBot
+    except ImportError:
+        pass
 
 log = logging.getLogger(__name__)
 
@@ -151,7 +155,7 @@ class Reminders(commands.Cog):
             await self.reminder_db.delete_reminder_by_message_id(message_id)
 
         except asyncio.CancelledError:
-            # Task was cancelled because a newer, earlier reminder was added.
+            # Task was canceled because a newer, earlier reminder was added.
             # We explicitly pass here to allow the task to die gracefully.
             log.warning("Reminder timer cancelled.")
         except Exception:
@@ -262,6 +266,20 @@ class Reminders(commands.Cog):
 
         return dt, clean_text
 
+    # --- Helper: Get timezone either from TZBot or local database ---
+    async def _get_timezone(self, user_id: UserId, guild_id: GuildId) -> ZoneInfo:
+        tz: ZoneInfo | None = None
+        if self.bot.tzbot:
+            from tzbot4py import TZRequest, TimezoneFromUserIDData
+            request = await self.bot.tzbot.make_request(TZRequest(TimezoneFromUserIDData(user_id)))
+            if request.is_successful():
+                tz = ZoneInfo(request.get_response_str())
+
+        if not tz:
+            tz = await self.user_db.get_timezone(user_id, guild_id)
+
+        return tz
+
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message) -> None:
         """If a message is deleted, remove its associated reminder."""
@@ -293,7 +311,8 @@ class Reminders(commands.Cog):
 
         user_id = UserId(message.author.id)
         guild_id = GuildId(message.guild.id)
-        tz = await self.user_db.get_timezone(user_id, guild_id)
+
+        tz = await self._get_timezone(user_id, guild_id)
 
         dt, reminder_msg = self._parse_time(clean_content, tz)
 
@@ -399,7 +418,7 @@ class Reminders(commands.Cog):
             return
 
         embed = discord.Embed(title="Your Reminders", color=discord.Color.blue())
-        tz = await self.user_db.get_timezone(user_id, GuildId(interaction.guild.id))
+        tz = await self._get_timezone(user_id, GuildId(interaction.guild.id))
 
         for message_id, msg, remind_at_str in reminders:
             utc_dt = datetime.strptime(remind_at_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
