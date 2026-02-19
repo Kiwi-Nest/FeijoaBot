@@ -14,6 +14,11 @@ dependencies = [
   "async-mojang>=1.0.5",
 ]
 
+[project.optional-dependencies]
+tzbotsupport = [
+    "tzbot4py",
+]
+
 [tool.ruff]
 line-length = 130
 indent-width = 4
@@ -54,6 +59,7 @@ unresolved-import = "ignore"
 discord-py = { git = "https://github.com/Rapptz/discord.py" }
 async-mojang = { git = "https://github.com/Restitutor/Async-Mojang" }
 blackjack21 = { git = "https://github.com/Restitutor/blackjack21", rev = "v5.0.0" }
+tzbot4py = { git = "https://github.com/m3z0id/TZBot4PY.git" }
 
 [tool.ruff.format]
 quote-style = "double"

@@ -116,6 +116,18 @@ class KiwiBot(commands.Bot):
                         guild_id,
                     )
 
+
+        try:
+            from tzbot4py import TZBot, TZFlags
+            if not (self.config.tzbot_host and self.config.tzbot_port and self.config.tzbot_api_key):
+                log.warning("TZBot support is enabled but it's not configured! Falling back to defaults...")
+                self.tzbot = None
+            else:
+                self.tzbot: TZBot | None = TZBot(self.config.tzbot_host, self.config.tzbot_port, self.config.tzbot_api_key, self.config.tzbot_encryption_key)
+                self.tzbot.set_flags(TZFlags.AES, TZFlags.MSGPACK)
+        except ImportError:
+            self.tzbot: None = None
+
         log.info("Setup complete.")
 
     async def on_ready(self) -> None:
