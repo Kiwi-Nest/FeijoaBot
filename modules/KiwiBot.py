@@ -153,7 +153,7 @@ class KiwiBot(commands.Bot):
         # Now it's safe to load cogs
         try:
             # Add 'cogs.' prefix to the path for loading
-            for file in pathlib.Path("cogs/").glob("*.py"):  # noqa: ASYNC240
+            for file in sorted(pathlib.Path("cogs/").glob("*.py")):  # noqa: ASYNC240
                 if file.is_file():
                     # Skip loading paper_trading if logic isn't available
                     if file.stem == "paper_trading" and not self.trading_logic:
