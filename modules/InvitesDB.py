@@ -8,14 +8,12 @@ special case where an inviter is unknown (represented by `inviter_id = 0`).
 
 import logging
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import aiohttp
 
+from modules.Database import Database
 from modules.dtypes import GuildId, InviterId, UserId
-
-if TYPE_CHECKING:
-    from modules.Database import Database
 
 log = logging.getLogger(__name__)
 

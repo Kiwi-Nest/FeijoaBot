@@ -30,7 +30,6 @@ class BotConfig:
     tzbot_api_key: str | None
     tzbot_encryption_key: str | None
 
-
     @classmethod
     def from_environment(cls) -> Self:
         """Load all configuration from environment variables."""

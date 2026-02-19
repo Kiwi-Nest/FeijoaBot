@@ -5,12 +5,13 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands, tasks
 
+from modules.ConfigDB import ConfigDB
 from modules.dtypes import GuildId
+from modules.KiwiBot import KiwiBot
 from modules.security_utils import check_bot_hierarchy, check_verifiable_role
 
 if TYPE_CHECKING:
-    from modules.ConfigDB import ConfigDB, GuildConfig
-    from modules.KiwiBot import KiwiBot
+    from modules.ConfigDB import GuildConfig
 
 # Set up logging for this cog
 log = logging.getLogger(__name__)

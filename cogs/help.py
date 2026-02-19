@@ -1,5 +1,4 @@
 import logging
-from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -7,9 +6,7 @@ from discord.app_commands import AppCommandGroup, Command, ContextMenu, Group
 from discord.ext import commands, tasks
 
 from modules.help_command import FeijoaCommand
-
-if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 

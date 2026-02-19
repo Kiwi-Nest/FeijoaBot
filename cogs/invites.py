@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 import discord
 from discord import app_commands
@@ -8,10 +8,8 @@ from discord.ext import commands
 
 from modules.dtypes import GuildId, InviterId, UserId
 from modules.guild_cog import GuildOnlyHybridCog
-
-if TYPE_CHECKING:
-    from modules.InvitesDB import InvitesDB
-    from modules.KiwiBot import KiwiBot
+from modules.InvitesDB import InvitesDB
+from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 

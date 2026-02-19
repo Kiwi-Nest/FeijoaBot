@@ -15,13 +15,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-tzbotsupport = [
-    "tzbot4py",
-]
+tzbotsupport = ["tzbot4py"]
 
 [tool.ruff]
 line-length = 130
 indent-width = 4
+target-version = "py313"
 
 [tool.ruff.lint]
 # Require explicit selection of preview rules.

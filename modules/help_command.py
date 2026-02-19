@@ -1,11 +1,11 @@
 from typing import TYPE_CHECKING, ClassVar, Final, Self
 
 if TYPE_CHECKING:
-    from discord.app_commands import AppCommand, AppCommandGroup, Group
-    from discord.app_commands.transformers import CommandParameter
+    from discord.app_commands import AppCommand, AppCommandGroup
 
 from discord import Permissions
-from discord.app_commands import Command, MissingPermissions
+from discord.app_commands import Command, Group, MissingPermissions
+from discord.app_commands.transformers import CommandParameter
 
 from modules.dtypes import PositiveInt
 

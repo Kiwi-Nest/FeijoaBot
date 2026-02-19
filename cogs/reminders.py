@@ -8,8 +8,8 @@ import contextlib
 import logging
 import re
 from datetime import UTC, datetime, timedelta
-from zoneinfo import ZoneInfo
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 import discord
 from dateparser.search import search_dates
@@ -17,15 +17,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import ChannelId, GuildId, MessageId, UserId
+from modules.KiwiBot import KiwiBot
+from modules.ReminderDB import ReminderDB
+from modules.UserDB import UserDB
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
-    from modules.ReminderDB import ReminderDB
-    from modules.UserDB import UserDB
 
-    try:
-        from tzbot4py import TZBot
-    except ImportError:
+    with contextlib.suppress(ImportError):
         pass
 
 log = logging.getLogger(__name__)
@@ -270,7 +268,8 @@ class Reminders(commands.Cog):
     async def _get_timezone(self, user_id: UserId, guild_id: GuildId) -> ZoneInfo:
         tz: ZoneInfo | None = None
         if self.bot.tzbot:
-            from tzbot4py import TZRequest, TimezoneFromUserIDData
+            from tzbot4py import TimezoneFromUserIDData, TZRequest
+
             request = await self.bot.tzbot.make_request(TZRequest(TimezoneFromUserIDData(user_id)))
             if request.is_successful():
                 tz = ZoneInfo(request.get_response_str())

@@ -3,12 +3,9 @@ import ipaddress
 import logging
 import math
 import struct
-from typing import TYPE_CHECKING
 
+from cogs.leveling import LevelingCog
 from modules.dtypes import NonNegativeInt, UserId
-
-if TYPE_CHECKING:
-    from cogs.leveling import LevelingCog
 
 log = logging.getLogger(__name__)
 

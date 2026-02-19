@@ -1,18 +1,15 @@
 import contextlib
-from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from modules.ConfigDB import ConfigDB
+from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.dtypes import GuildId, GuildInteraction, NonNegativeInt, PositiveInt, UserId
 from modules.exceptions import UserError
-
-if TYPE_CHECKING:
-    from modules.ConfigDB import ConfigDB
-    from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
-    from modules.UserDB import UserDB
+from modules.KiwiBot import KiwiBot
+from modules.UserDB import UserDB
 
 
 @commands.guild_only()

@@ -2,16 +2,13 @@ import asyncio
 import datetime
 import logging
 import time
-import typing
 
 import discord
 from discord.ext import commands
 
+from modules.ConfigDB import ConfigDB
 from modules.dtypes import GuildId
-
-if typing.TYPE_CHECKING:
-    from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
+from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 

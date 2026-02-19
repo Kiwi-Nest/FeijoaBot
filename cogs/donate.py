@@ -1,19 +1,17 @@
 import logging
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.dtypes import GuildId, UserId, is_positive
 from modules.enums import StatName
 from modules.exceptions import InsufficientFundsError
 from modules.guild_cog import GuildOnlyHybridCog
-
-if TYPE_CHECKING:
-    from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
-    from modules.UserDB import UserDB
+from modules.KiwiBot import KiwiBot
+from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 SECOND_COOLDOWN: Final[int] = 1

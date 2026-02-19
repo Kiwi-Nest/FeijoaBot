@@ -9,23 +9,19 @@ import datetime
 import logging
 import random
 import time
-from typing import TYPE_CHECKING, override
+from collections.abc import Iterable
+from typing import override
 from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import commands, tasks
 
+from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.dtypes import GuildId, PositiveInt, ReminderPreference, UserId
 from modules.guild_cog import GuildOnlyHybridCog
-
-if TYPE_CHECKING:
-    # This avoids circular imports while providing type hints for the bot class
-    from collections.abc import Iterable
-
-    from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
-    from modules.TaskDB import TaskDB
-    from modules.UserDB import UserDB
+from modules.KiwiBot import KiwiBot
+from modules.TaskDB import TaskDB
+from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 

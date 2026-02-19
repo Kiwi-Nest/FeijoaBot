@@ -1,4 +1,3 @@
-from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -6,10 +5,8 @@ from discord.ext import commands
 
 from modules.dtypes import GuildId, NonNegativeInt, UserId
 from modules.enums import StatName
-
-if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
-    from modules.UserDB import UserDB
+from modules.KiwiBot import KiwiBot
+from modules.UserDB import UserDB
 
 
 class LeaderboardView(discord.ui.View):

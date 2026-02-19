@@ -2,17 +2,15 @@ import logging
 import re
 import time
 from collections import defaultdict
-from typing import TYPE_CHECKING, TypedDict, cast, override
+from typing import TypedDict, cast, override
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import AnalysisStatus, MessageId, is_guild_message
+from modules.KiwiBot import KiwiBot
 from modules.security_utils import check_bot_hierarchy, check_verifiable_role
-
-if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
 
 # A structured dictionary for analysis results, improving code clarity.
 

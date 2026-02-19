@@ -1,6 +1,6 @@
 import logging
 import pathlib
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 import aiohttp
 import discord
@@ -9,6 +9,7 @@ from discord.app_commands import CommandSyncFailure, TranslationError
 from discord.ext import commands
 from discord.ext.commands import ExtensionAlreadyLoaded, ExtensionFailed, ExtensionNotFound, NoEntryPointError
 
+from modules.config import BotConfig
 from modules.ConfigDB import ConfigDB
 from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.Database import Database
@@ -18,9 +19,6 @@ from modules.server_admin import ServerManager
 from modules.TaskDB import TaskDB
 from modules.trading_logic import TradingLogic
 from modules.UserDB import UserDB
-
-if TYPE_CHECKING:
-    from modules.config import BotConfig
 
 log = logging.getLogger(__name__)
 
@@ -116,14 +114,19 @@ class KiwiBot(commands.Bot):
                         guild_id,
                     )
 
-
         try:
             from tzbot4py import TZBot, TZFlags
+
             if not (self.config.tzbot_host and self.config.tzbot_port and self.config.tzbot_api_key):
                 log.warning("TZBot support is enabled but it's not configured! Falling back to defaults...")
                 self.tzbot = None
             else:
-                self.tzbot: TZBot | None = TZBot(self.config.tzbot_host, self.config.tzbot_port, self.config.tzbot_api_key, self.config.tzbot_encryption_key)
+                self.tzbot: TZBot | None = TZBot(
+                    self.config.tzbot_host,
+                    self.config.tzbot_port,
+                    self.config.tzbot_api_key,
+                    self.config.tzbot_encryption_key,
+                )
                 self.tzbot.set_flags(TZFlags.AES, TZFlags.MSGPACK)
         except ImportError:
             self.tzbot: None = None

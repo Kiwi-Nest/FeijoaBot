@@ -2,17 +2,15 @@ import contextlib
 import datetime
 import logging
 import math
-from typing import TYPE_CHECKING, Final, Literal
+from typing import Final, Literal
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-if TYPE_CHECKING:
-    from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
-
+from modules.ConfigDB import ConfigDB
 from modules.dtypes import GuildId, GuildInteraction
+from modules.KiwiBot import KiwiBot
 from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_moderation_action
 
 log = logging.getLogger(__name__)

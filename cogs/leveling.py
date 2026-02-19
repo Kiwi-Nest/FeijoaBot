@@ -2,24 +2,22 @@ import asyncio
 import logging
 import string
 import time
-from typing import TYPE_CHECKING, Final
+from typing import Final
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
+from modules.ConfigDB import ConfigDB
 from modules.dtypes import GuildId, GuildInteraction, NonNegativeInt, PositiveInt, UserGuildPair, UserId
 from modules.enums import StatName
 
 # Import the refactored logic and helpers
 from modules.guild_cog import GuildOnlyHybridCog
+from modules.KiwiBot import KiwiBot
 from modules.leveling_utils import LevelBotProtocol, get_level, to_next_level
 from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_role_safety
-
-if TYPE_CHECKING:
-    from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
-    from modules.UserDB import UserDB
+from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 

@@ -2,21 +2,18 @@ import asyncio
 import datetime
 import logging
 import random
-from typing import TYPE_CHECKING
 
 import discord
 from discord.ext import commands
 
+from modules.ConfigDB import ConfigDB
+from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.discord_utils import InvalidRoleError, ping_online_role
 from modules.dtypes import GuildId, PositiveInt, RoleId, UserId
 from modules.enums import StatName
+from modules.KiwiBot import KiwiBot
+from modules.UserDB import UserDB
 from modules.utils import format_ordinal
-
-if TYPE_CHECKING:
-    from modules.ConfigDB import ConfigDB
-    from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
-    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 

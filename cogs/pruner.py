@@ -5,12 +5,12 @@ from discord import Forbidden, HTTPException
 from discord.ext import commands, tasks
 
 from modules.dtypes import GuildId
+from modules.KiwiBot import KiwiBot
 from modules.security_utils import check_bot_hierarchy, check_verifiable_role
+from modules.UserDB import UserDB
 
 if TYPE_CHECKING:
     from modules.ConfigDB import GuildConfig
-    from modules.KiwiBot import KiwiBot
-    from modules.UserDB import UserDB
 
 # Use Python's logging module for better diagnostics in a reusable component
 log = logging.getLogger(__name__)
