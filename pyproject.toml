@@ -58,7 +58,7 @@ unresolved-import = "ignore"
 discord-py = { git = "https://github.com/Rapptz/discord.py" }
 async-mojang = { git = "https://github.com/Restitutor/Async-Mojang" }
 blackjack21 = { git = "https://github.com/Restitutor/blackjack21", rev = "v5.0.0" }
-tzbot4py = { git = "https://github.com/m3z0id/TZBot4PY.git" }
+tzbot4py = { git = "https://github.com/m3z0id/TZBot4PY.git", rev = "v1.0.1" }
 
 [tool.ruff.format]
 quote-style = "double"
