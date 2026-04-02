@@ -466,7 +466,7 @@ All are leveraged ETFs and are intended for short-term trading.",
         )
         embed.add_field(
             name="3. Sector Long: SOXL (Semiconductors)",
-            value="SOXL delivers **3× daily returns** of a semiconductor industry index. This sector underpins much of the modern economy — powering everything from smartphones to AI systems. Traders use SOXL to express a **high-conviction view on tech hardware growth**.",  # noqa: RUF001, E501
+            value="SOXL delivers **3× daily returns** of a semiconductor industry index. This sector underpins much of the modern economy - powering everything from smartphones to AI systems. Traders use SOXL to express a **high-conviction view on tech hardware growth**.",  # noqa: RUF001, E501
             inline=False,
         )
         embed.add_field(

@@ -38,7 +38,7 @@ def to_next_level(xp: NonNegativeInt) -> NonNegativeInt:
 class LevelBotProtocol(asyncio.DatagramProtocol):
     """Handle incoming UDP packets for the leveling system."""
 
-    def __init__(self, cog_instance: "LevelingCog") -> None:
+    def __init__(self, cog_instance: LevelingCog) -> None:
         self.cog = cog_instance
         super().__init__()
 

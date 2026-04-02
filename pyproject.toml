@@ -6,12 +6,12 @@ readme = "README.md"
 requires-python = ">=3.14"
 
 dependencies = [
-  "python-dotenv==1.1.1",
-  "discord-py==2.6.3",
-  "aiosqlite==0.21.0",
-  "blackjack21>=4.0.0",
+  "python-dotenv>=1.2.2",
+  "discord-py==2.8.0a5403+g5d74ed3e",
+  "aiosqlite>=0.22.1",
+  "blackjack21>=5.0.0",
   "requests>=2.32.5",
-  "async-mojang>=1.0.5",
+  "async-mojang>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +20,7 @@ tzbotsupport = ["tzbot4py"]
 [tool.ruff]
 line-length = 130
 indent-width = 4
-target-version = "py313"
+target-version = "py314"
 
 [tool.ruff.lint]
 # Require explicit selection of preview rules.
@@ -57,7 +57,6 @@ unresolved-import = "ignore"
 [tool.uv.sources]
 discord-py = { git = "https://github.com/Rapptz/discord.py" }
 async-mojang = { git = "https://github.com/Restitutor/Async-Mojang" }
-blackjack21 = { git = "https://github.com/Restitutor/blackjack21", rev = "v5.0.0" }
 tzbot4py = { git = "https://github.com/m3z0id/TZBot4PY.git", rev = "v1.0.1" }
 
 [tool.ruff.format]

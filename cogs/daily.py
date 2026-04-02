@@ -9,19 +9,22 @@ import datetime
 import logging
 import random
 import time
-from collections.abc import Iterable
-from typing import override
+from typing import TYPE_CHECKING, override
 from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import commands, tasks
 
-from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.dtypes import GuildId, PositiveInt, ReminderPreference, UserId
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.KiwiBot import KiwiBot
-from modules.TaskDB import TaskDB
-from modules.UserDB import UserDB
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from modules.CurrencyLedgerDB import CurrencyLedgerDB
+    from modules.KiwiBot import KiwiBot
+    from modules.TaskDB import TaskDB
+    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 
@@ -189,7 +192,10 @@ class Daily(GuildOnlyHybridCog):
             if users_to_remind:
                 log.info("Preparing to send %d daily reminders.", len(users_to_remind))
                 # Use a set to automatically handle duplicate user IDs if they exist across guilds
-                await self.send_reminders(set(users_to_remind))
+                failed_ids = await self.send_reminders(set(users_to_remind))
+                if failed_ids:
+                    log.info("Disabling reminders for %d users with blocked DMs.", len(failed_ids))
+                    await self.user_db.disable_reminders(failed_ids)
 
         except Exception:
             log.exception("An error occurred during the daily management task.")
@@ -223,14 +229,17 @@ class Daily(GuildOnlyHybridCog):
         else:
             log.info("Daily task loop has no missed run.")
 
-    async def send_reminders(self, user_ids: Iterable[UserId]) -> None:
-        """Send reminders to a list of users sequentially to avoid rate limits."""
-        reminder_message = "⏰ Your daily reward is ready to claim! Use `/daily` to get your reward."
-        success_count = 0
-        total_count = 0
+    async def send_reminders(self, user_ids: Iterable[UserId]) -> list[UserId]:
+        """Send reminders to a list of users sequentially to avoid rate limits.
 
-        for user_id in user_ids:
-            total_count += 1
+        Returns a list of user IDs whose DMs could not be delivered (blocked or unknown).
+        """
+        reminder_message = "⏰ Your daily reward is ready to claim! Use `/daily` to get your reward."
+        ids = list(user_ids)
+        success_count = 0
+        failed: list[UserId] = []
+
+        for i, user_id in enumerate(ids):
             try:
                 user = await self.bot.fetch_user(user_id)
                 await user.send(reminder_message)
@@ -240,17 +249,18 @@ class Daily(GuildOnlyHybridCog):
                     "Could not send reminder to user %d (DMs disabled or user not found).",
                     user_id,
                 )
+                failed.append(user_id)
             except discord.HTTPException:
                 log.exception("Failed to send reminder to user %d due to an HTTP error.", user_id)
-            finally:
-                # Wait for a short duration between messages to respect rate limits.
+            if i < len(ids) - 1:
                 await asyncio.sleep(1)
 
         log.info(
             "Successfully sent %d out of %d daily reminders.",
             success_count,
-            total_count,
+            len(ids),
         )
+        return failed
 
     @commands.hybrid_command(name="daily", description="Claim your daily currency.")
     async def daily(self, ctx: commands.Context) -> None:

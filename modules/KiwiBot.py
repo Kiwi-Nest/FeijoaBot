@@ -1,15 +1,19 @@
 import logging
 import pathlib
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import aiohttp
 import discord
 from discord import Forbidden, HTTPException, MissingApplicationID
 from discord.app_commands import CommandSyncFailure, TranslationError
 from discord.ext import commands
-from discord.ext.commands import ExtensionAlreadyLoaded, ExtensionFailed, ExtensionNotFound, NoEntryPointError
+from discord.ext.commands import (
+    ExtensionAlreadyLoaded,
+    ExtensionFailed,
+    ExtensionNotFound,
+    NoEntryPointError,
+)
 
-from modules.config import BotConfig
 from modules.ConfigDB import ConfigDB
 from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.Database import Database
@@ -19,6 +23,9 @@ from modules.server_admin import ServerManager
 from modules.TaskDB import TaskDB
 from modules.trading_logic import TradingLogic
 from modules.UserDB import UserDB
+
+if TYPE_CHECKING:
+    from modules.config import BotConfig
 
 log = logging.getLogger(__name__)
 

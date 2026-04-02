@@ -1,14 +1,16 @@
 import logging
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules.ConfigDB import ConfigDB
 from modules.dtypes import GuildId, GuildInteraction, UserId
-from modules.KiwiBot import KiwiBot
 from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_role_safety, ensure_verifiable_role
+
+if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 

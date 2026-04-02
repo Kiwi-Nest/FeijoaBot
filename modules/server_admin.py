@@ -499,7 +499,7 @@ MC_TO_ANSI = {
     "§x": ANSI_END,
     "§o": ANSI_END,
     "§m": ANSI_END,
-    "§7": "",  # Default grey — strip
+    "§7": "",  # Default grey - strip
 }
 
 

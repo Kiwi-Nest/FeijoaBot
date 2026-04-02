@@ -1,11 +1,15 @@
 import logging
+from typing import TYPE_CHECKING
 
-import discord
 from discord.ext import commands, tasks
 
 from modules.dtypes import GuildId, UserGuildPair, UserId
-from modules.KiwiBot import KiwiBot
-from modules.UserDB import UserDB
+
+if TYPE_CHECKING:
+    import discord
+
+    from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 

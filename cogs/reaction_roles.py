@@ -2,15 +2,17 @@ import logging
 import re
 import time
 from collections import defaultdict
-from typing import TypedDict, cast, override
+from typing import TYPE_CHECKING, TypedDict, cast, override
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import AnalysisStatus, MessageId, is_guild_message
-from modules.KiwiBot import KiwiBot
 from modules.security_utils import check_bot_hierarchy, check_verifiable_role
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
 
 # A structured dictionary for analysis results, improving code clarity.
 
@@ -264,14 +266,18 @@ class ReactionRoles(commands.Cog):
         if not guild:
             return None
 
-        try:
-            member = await guild.fetch_member(payload.user_id)
-        except discord.NotFound:
-            log.debug("Member %d not found in guild %d.", payload.user_id, guild.id)
-            return None
+        # Local cache check first to reduce API calls
+        if (member := guild.get_member(payload.user_id)) is None:
+            try:
+                member = await guild.fetch_member(payload.user_id)
+            except discord.NotFound:
+                log.debug("Member %d not found in guild %d.", payload.user_id, guild.id)
+                return None
 
         try:
-            channel = await self.bot.fetch_channel(payload.channel_id)
+            if (channel := self.bot.get_channel(payload.channel_id)) is None:
+                channel = await self.bot.fetch_channel(payload.channel_id)
+
             message = await cast("discord.TextChannel", channel).fetch_message(
                 payload.message_id,
             )

@@ -2,17 +2,19 @@ import logging
 import os
 import random
 import string
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 from discord import Object, app_commands
 from discord.ext import commands
 
-from modules.config import BotConfig
-from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.dtypes import GuildId, PositiveInt, UserId
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.KiwiBot import KiwiBot
-from modules.UserDB import UserDB
+
+if TYPE_CHECKING:
+    from modules.config import BotConfig
+    from modules.CurrencyLedgerDB import CurrencyLedgerDB
+    from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 

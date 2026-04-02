@@ -1,4 +1,7 @@
-from modules.dtypes import NonNegativeInt
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from modules.dtypes import NonNegativeInt
 
 
 def format_ordinal(n: NonNegativeInt) -> str:

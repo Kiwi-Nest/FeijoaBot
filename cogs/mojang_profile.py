@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Final
+from typing import TYPE_CHECKING, Final
 from uuid import UUID
 
 import discord
@@ -9,7 +9,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.exceptions import UserError
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 

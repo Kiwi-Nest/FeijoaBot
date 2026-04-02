@@ -1,11 +1,10 @@
 import logging
 import re
+from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
-
-from modules.KiwiBot import KiwiBot
 
 # Assuming server_admin.py is in a location Python can import from
 from modules.server_admin import (
@@ -16,6 +15,9 @@ from modules.server_admin import (
     ServerStateError,
     format_mc_ansi,
 )
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 

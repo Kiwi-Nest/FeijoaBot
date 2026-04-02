@@ -1,5 +1,5 @@
 import logging
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import discord
 from discord import app_commands
@@ -8,8 +8,10 @@ from discord.ext import commands
 from modules.dtypes import GuildId, UserId
 from modules.enums import StatName
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.KiwiBot import KiwiBot
-from modules.UserDB import UserDB
+
+if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
+    from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
 SECOND_COOLDOWN: Final[int] = 1

@@ -17,11 +17,12 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import ChannelId, GuildId, MessageId, UserId
-from modules.KiwiBot import KiwiBot
-from modules.ReminderDB import ReminderDB
-from modules.UserDB import UserDB
 
 if TYPE_CHECKING:
+    from modules.KiwiBot import KiwiBot
+    from modules.ReminderDB import ReminderDB
+    from modules.UserDB import UserDB
+
     with contextlib.suppress(ImportError):
         pass
 

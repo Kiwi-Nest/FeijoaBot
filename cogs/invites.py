@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import Final
+from typing import TYPE_CHECKING, Final
 
 import discord
 from discord import app_commands
@@ -8,8 +8,10 @@ from discord.ext import commands
 
 from modules.dtypes import GuildId, InviterId, UserId
 from modules.guild_cog import GuildOnlyHybridCog
-from modules.InvitesDB import InvitesDB
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.InvitesDB import InvitesDB
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -187,7 +189,7 @@ class InvitesCog(GuildOnlyHybridCog):
         for i, (user_id, invite_count) in enumerate(leaderboard_data):
             rank = emojis[i] if i < len(emojis) else f"**#{i + 1}**"
             user_display = f"<@{user_id}>" if user_id is not None else "Unknown Inviter"
-            leaderboard_text.append(f"{rank} {user_display} — **{invite_count}** invites")
+            leaderboard_text.append(f"{rank} {user_display} - **{invite_count}** invites")
 
         embed.description = "\n".join(leaderboard_text)
         await interaction.followup.send(embed=embed)

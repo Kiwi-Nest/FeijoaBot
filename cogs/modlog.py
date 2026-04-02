@@ -2,13 +2,16 @@ import asyncio
 import datetime
 import logging
 import time
+from typing import TYPE_CHECKING
 
 import discord
 from discord.ext import commands
 
-from modules.ConfigDB import ConfigDB
 from modules.dtypes import GuildId
-from modules.KiwiBot import KiwiBot
+
+if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -132,7 +135,7 @@ class ModLogCog(commands.Cog):
                 ),
                 warning_type="audit_log_permission",
             )
-        except discord.HTTPException:
+        except discord.HTTPException, discord.errors.NotFound:
             log.exception("Failed to fetch audit logs")
 
         return None, None

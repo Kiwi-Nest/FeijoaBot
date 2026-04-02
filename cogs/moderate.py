@@ -2,16 +2,22 @@ import contextlib
 import datetime
 import logging
 import math
-from typing import Final, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules.ConfigDB import ConfigDB
 from modules.dtypes import GuildId, GuildInteraction
-from modules.KiwiBot import KiwiBot
-from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_moderation_action
+from modules.security_utils import (
+    SecurityCheckError,
+    ensure_bot_hierarchy,
+    ensure_moderation_action,
+)
+
+if TYPE_CHECKING:
+    from modules.ConfigDB import ConfigDB
+    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -230,21 +236,21 @@ class Moderate(
 
     # --- MODERATION COMMANDS ---
 
-    @app_commands.command(name="ban", description="Bans a member from the server.")
+    @app_commands.command(name="ban", description="Bans a user from the server.")
     @app_commands.checks.has_permissions(ban_members=True)  # Still need specific perm
     async def ban(
         self,
         interaction: GuildInteraction,
-        member: discord.Member,
+        user: discord.User,
         reason: str | None = None,
         delete_messages: Literal[
             "Don't delete any",
             "Last 24 hours",
             "Last 7 days",
         ] = "Don't delete any",
-        notify_member: bool = True,
+        notify_member: bool = False,
     ) -> None:
-        """Bans a member and optionally deletes their recent messages."""
+        """Bans a user and optionally deletes their recent messages."""
         # _pre_action_checks is handled by interaction_check
         delete_seconds = 0
         if delete_messages == "Last 24 hours":
@@ -252,19 +258,19 @@ class Moderate(
         elif delete_messages == "Last 7 days":
             delete_seconds = 604800
 
-        if notify_member:
-            await self._notify_member(interaction, member, "banned", reason)
+        if notify_member and type(user) is discord.Member:
+            await self._notify_member(interaction, user, "banned", reason)
 
         try:
-            await member.ban(reason=reason, delete_message_seconds=delete_seconds)
+            await interaction.guild.ban(user, reason=reason, delete_message_seconds=delete_seconds)
             await interaction.response.send_message(
-                f"✅ **{member.display_name}** has been banned.",
+                f"✅ **{user.display_name}** has been banned.",
                 ephemeral=True,
             )
-            log.info("%s banned %s for: %s", interaction.user, member, reason)
+            log.info("%s banned %s for: %s", interaction.user, user, reason)
         except discord.Forbidden:
             await interaction.response.send_message(
-                "❌ I don't have the required permissions to ban this member.",
+                "❌ I don't have the required permissions to ban this user.",
                 ephemeral=True,
             )
         except discord.HTTPException as e:
@@ -272,7 +278,7 @@ class Moderate(
                 f"A {e.status} {e.code} error has occurred.",
                 ephemeral=True,
             )
-            log.exception("Failed to ban %s", member)
+            log.exception("Failed to ban %s", user)
 
     @app_commands.command(name="kick", description="Kicks a member from the server.")
     @app_commands.checks.has_permissions(kick_members=True)  # Still need specific perm

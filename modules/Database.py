@@ -1,8 +1,10 @@
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 import aiosqlite
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 
 class Database:

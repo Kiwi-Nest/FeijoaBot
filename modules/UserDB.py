@@ -25,6 +25,8 @@ from modules.dtypes import (
 from modules.enums import StatName
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from modules.CurrencyLedgerDB import CurrencyLedgerDB, EventReason
     from modules.Database import Database
 
@@ -147,6 +149,24 @@ class UserDB:
                 last_active_timestamp = excluded.last_active_timestamp
                 """,  # noqa: S608
                 (user_id, guild_id, preference),
+            )
+            await conn.commit()
+
+    async def disable_reminders(self, user_ids: Iterable[UserId]) -> None:
+        """Disable daily reminders for a list of users across all guilds."""
+        ids = list(user_ids)
+        if not ids:
+            return
+        placeholders = ",".join("?" * len(ids))
+        async with self.database.get_conn() as conn:
+            await conn.execute(
+                f"""
+                UPDATE {self.USERS_TABLE}
+                SET daily_reminder_preference = 'NEVER'
+                WHERE discord_id IN ({placeholders})
+                  AND daily_reminder_preference != 'NEVER'
+                """,  # noqa: S608
+                ids,
             )
             await conn.commit()
 
