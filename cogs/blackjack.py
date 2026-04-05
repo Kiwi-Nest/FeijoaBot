@@ -13,9 +13,10 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, PositiveInt, UserId
-from modules.enums import StatName
+from modules.errors import InsufficientFunds
 from modules.exceptions import UserError
 from modules.guild_cog import GuildOnlyHybridCog
+from modules.result import Err, Ok
 
 if TYPE_CHECKING:
     from discord import Interaction
@@ -38,7 +39,7 @@ class GameResult(Enum):
     SURRENDER = auto()
 
 
-# --- Result Configuration ---
+# Result Configuration
 RESULT_CONFIG = {
     GameResult.WIN: {
         "stat": "wins",
@@ -73,7 +74,7 @@ RESULT_CONFIG = {
 }
 
 
-# --- UI View: The Core of the Game ---
+# UI View: The Core of the Game
 class BlackjackView(discord.ui.View):
     """Manages the entire game state, logic, and UI components for a single game."""
 
@@ -135,7 +136,7 @@ class BlackjackView(discord.ui.View):
         """Calculates the total bet across all hands."""
         return sum(hand.bet for hand in self.player.hands)
 
-    # --- Button and UI State Management ---
+    # Button and UI State Management
     def _update_buttons(self) -> None:
         """Clear and adds buttons based on the current game state."""
         self.clear_items()
@@ -172,7 +173,7 @@ class BlackjackView(discord.ui.View):
         user_id = UserId(interaction.user.id)
         guild_id = GuildId(interaction.guild.id)
 
-        # --- DETERMINE LEDGER REASON ---
+        # DETERMINE LEDGER REASON
         reason: EventReason
         if action_name == "double down":
             reason = "BLACKJACK_DOUBLE_DOWN"
@@ -182,29 +183,21 @@ class BlackjackView(discord.ui.View):
             # Fallback, though this shouldn't be hit
             reason = "BLACKJACK_BET"
 
-        new_balance = await self.user_db.burn_currency(
+        match await self.user_db.burn_currency(
             user_id=user_id,
             guild_id=guild_id,
             amount=PositiveInt(amount),
             event_reason=reason,
             ledger_db=self.ledger_db,
             initiator_id=user_id,
-        )
+        ):
+            case Ok(_):
+                return True
+            case Err(InsufficientFunds(available, required)):
+                msg = f"You don't have enough credits to {action_name}. You need ${required:,} but only have ${available:,}."
+                raise UserError(msg)
 
-        if new_balance is None:
-            # Get the balance *after* the failed burn for the error message
-            balance = await self.user_db.get_stat(
-                user_id,
-                guild_id,
-                StatName.CURRENCY,
-            )
-
-            msg = f"You don't have enough credits to {action_name}. You need ${amount:,} but only have ${balance:,}."
-            raise UserError(msg)
-
-        return True
-
-    # --- Game Flow & Logic ---
+    # Game Flow & Logic
     async def resolve_payout_and_stats(
         self,
         result: GameResult,
@@ -215,7 +208,7 @@ class BlackjackView(discord.ui.View):
         if not (config := RESULT_CONFIG.get(result)):
             return
 
-        # --- 1. Update In-Memory Stats ---
+        # 1. Update In-Memory Stats
         guild_id = GuildId(self.user.guild.id)
         user_id = UserId(self.user.id)
 
@@ -224,7 +217,7 @@ class BlackjackView(discord.ui.View):
         stats[config["stat"]] += 1
         stats["net_credits"] += int(bet_amount * config["net_mult"])
 
-        # --- 2. Process Database Payout ---
+        # 2. Process Database Payout
         payout = int(bet_amount * config["payout_mult"])
         payout_reason = config.get("reason")  # Get the new reason from our config
 
@@ -307,7 +300,7 @@ class BlackjackView(discord.ui.View):
         await self._end_game()
         await interaction.edit_original_response(embed=self.create_embed(), view=self)
 
-    # --- Embed Creation ---
+    # Embed Creation
     def create_embed(self) -> discord.Embed:
         is_game_over = self.table.state == GameState.ROUND_OVER
 
@@ -369,7 +362,7 @@ class BlackjackView(discord.ui.View):
         return embed
 
 
-# --- Buttons ---
+# Buttons
 class HitButton(discord.ui.Button["BlackjackView"]):
     def __init__(self) -> None:
         super().__init__(
@@ -541,27 +534,23 @@ class PlayAgainButton(discord.ui.Button["BlackjackView"]):
         view = self.view
         user_id = UserId(interaction.user.id)
         guild_id = GuildId(interaction.guild.id)
-        new_balance = await view.user_db.burn_currency(
+        match await view.user_db.burn_currency(
             user_id=user_id,
             guild_id=guild_id,
             amount=PositiveInt(self.bet),
             event_reason="BLACKJACK_BET",
             ledger_db=view.ledger_db,
             initiator_id=user_id,
-        )
-
-        if new_balance is None:
-            balance = await view.user_db.get_stat(
-                user_id,
-                guild_id,
-                StatName.CURRENCY,
-            )
-            await interaction.response.edit_message(
-                content=f"You can't play again. You need ${self.bet:,} but only have ${balance:,}.",
-                embed=None,
-                view=None,
-            )
-            return
+        ):
+            case Err(InsufficientFunds(available, required)):
+                await interaction.response.edit_message(
+                    content=f"You can't play again. You need ${required:,} but only have ${available:,}.",
+                    embed=None,
+                    view=None,
+                )
+                return
+            case Ok(_):
+                pass
 
         view.outcome_message = None
         view.last_action = "New round started."
@@ -606,7 +595,7 @@ class NewBetButton(discord.ui.Button["BlackjackView"]):
         )
 
 
-# --- Helper & Cog ---
+# Helper & Cog
 def format_hand(hand: list[Card]) -> str:
     """Format cards with suit emojis for a richer display."""
     suits = {"Hearts": "♥️", "Diamonds": "♦️", "Spades": "♠️", "Clubs": "♣️"}
@@ -653,26 +642,22 @@ class BlackjackCog(GuildOnlyHybridCog):
     ) -> None:
         user_id = UserId(ctx.author.id)
         guild_id = GuildId(ctx.guild.id)
-        new_balance = await self.user_db.burn_currency(
+        match await self.user_db.burn_currency(
             user_id=user_id,
             guild_id=guild_id,
             amount=PositiveInt(bet),
             event_reason="BLACKJACK_BET",
             ledger_db=self.ledger_db,
             initiator_id=user_id,
-        )
-
-        if new_balance is None:
-            balance = await self.user_db.get_stat(
-                user_id,
-                guild_id,
-                StatName.CURRENCY,
-            )
-            await ctx.send(
-                f"Insufficient funds! You tried to bet ${bet:,} but only have ${balance:,}.",
-                ephemeral=True,
-            )
-            return
+        ):
+            case Err(InsufficientFunds(available, required)):
+                await ctx.send(
+                    f"Insufficient funds! You tried to bet ${required:,} but only have ${available:,}.",
+                    ephemeral=True,
+                )
+                return
+            case Ok(_):
+                pass
 
         view = BlackjackView(
             self.bot,

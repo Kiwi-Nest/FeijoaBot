@@ -6,9 +6,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, UserId, is_positive
-from modules.enums import StatName
-from modules.exceptions import InsufficientFundsError
+from modules.errors import InsufficientFunds, SelfTransfer
 from modules.guild_cog import GuildOnlyHybridCog
+from modules.result import Err, Ok
 
 if TYPE_CHECKING:
     from modules.CurrencyLedgerDB import CurrencyLedgerDB
@@ -39,39 +39,28 @@ class Donate(GuildOnlyHybridCog):
         receiver: discord.Member,
         amount: commands.Range[int, 1],
     ) -> None:
-        # Optional: Add checks to prevent donating to self or bots
-        if receiver.id == ctx.author.id:
-            await ctx.send("You cannot donate to yourself.", ephemeral=True)
-            return
-
         guild_id = GuildId(ctx.guild.id)
         sender_id = UserId(ctx.author.id)
         receiver_id = UserId(receiver.id)
 
-        if (balance := await self.user_db.get_stat(sender_id, guild_id, StatName.CURRENCY)) < amount:
-            msg = f"Insufficient funds! You have ${balance}"
-            raise InsufficientFundsError(msg)
-
         if not is_positive(amount):
-            # This branch is logically unreachable due to commands.Range,
-            # but it satisfies the type checker.
+            # Logically unreachable due to commands.Range, but narrows type to PositiveInt.
             await ctx.send("Amount must be positive.", ephemeral=True)
             return
 
-        success = await self.user_db.transfer_currency(
+        match await self.user_db.transfer_currency(
             sender_id=sender_id,
             receiver_id=receiver_id,
             guild_id=guild_id,
             amount=amount,
             ledger_db=self.ledger_db,
-        )
-
-        if success:
-            await ctx.send(
-                f"{ctx.author.mention} donated ${amount} to {receiver.mention}.",
-            )
-        else:
-            await ctx.send("Transaction failed. Please try again.")
+        ):
+            case Ok(_):
+                await ctx.send(f"{ctx.author.mention} donated ${amount:,} to {receiver.mention}.")
+            case Err(SelfTransfer()):
+                await ctx.send("You cannot donate to yourself.", ephemeral=True)
+            case Err(InsufficientFunds(available, _)):
+                await ctx.send(f"Insufficient funds! You have ${available:,}.", ephemeral=True)
 
         log.info("Donate command executed by %s.\n", ctx.author.display_name)
 

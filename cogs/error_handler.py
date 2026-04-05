@@ -66,11 +66,7 @@ class ErrorHandler(commands.Cog):
             error = error.original
 
         if isinstance(error, (UserError, SecurityCheckError)):
-            msg = f"❌ {error}"
-            if interaction.response.is_done():
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(msg, ephemeral=True)
+            await self._send_interaction(interaction, f"❌ {error}")
             return
 
         if isinstance(error, (app_errors.MissingPermissions, app_errors.BotMissingPermissions)):
@@ -78,20 +74,12 @@ class ErrorHandler(commands.Cog):
             return
 
         if isinstance(error, app_errors.CommandOnCooldown):
-            msg = f"This command is on cooldown. Try again in {error.retry_after:.2f}s."
-            if interaction.response.is_done():
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(msg, ephemeral=True)
+            await self._send_interaction(interaction, f"This command is on cooldown. Try again in {error.retry_after:.2f}s.")
             return
 
         if isinstance(error, app_errors.AppCommandError):
             # User-facing error raised directly by transformers or validators
-            msg = f"❌ {error}"
-            if interaction.response.is_done():
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(msg, ephemeral=True)
+            await self._send_interaction(interaction, f"❌ {error}")
             return
 
         logger.exception(
@@ -99,11 +87,13 @@ class ErrorHandler(commands.Cog):
             interaction.command.name if interaction.command else "Unknown",
             exc_info=error,
         )
-        msg = "An unexpected error occurred."
+        await self._send_interaction(interaction, "An unexpected error occurred.")
+
+    async def _send_interaction(self, interaction: Interaction, msg: str, *, ephemeral: bool = True) -> None:
         if interaction.response.is_done():
-            await interaction.followup.send(msg, ephemeral=True)
+            await interaction.followup.send(msg, ephemeral=ephemeral)
         else:
-            await interaction.response.send_message(msg, ephemeral=True)
+            await interaction.response.send_message(msg, ephemeral=ephemeral)
 
     async def _handle_permissions_error(self, source: ErrorContext, error: Exception) -> None:
         """Notify the user of missing permissions."""

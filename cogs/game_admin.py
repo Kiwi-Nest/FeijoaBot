@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-# --- The Main Cog Class ---
+# The Main Cog Class
 @commands.guild_only()
 @app_commands.default_permissions(ban_members=True, kick_members=True)
 @app_commands.checks.cooldown(5, 10.0, key=lambda i: (i.guild_id, i.user.id))
@@ -39,7 +39,7 @@ class GameAdmin(
         self.manager: ServerManager = server_manager
         super().__init__()
 
-    # --- Centralized Pre-Command Check ---
+    # Centralized Pre-Command Check
 
     def interaction_check(self, _interaction: discord.Interaction) -> bool:
         """Central check to ensure the Server Manager is running."""
@@ -48,7 +48,7 @@ class GameAdmin(
             raise app_commands.CheckFailure(msg)
         return True
 
-    # --- Autocomplete Callbacks (Unaffected by interaction_check) ---
+    # Autocomplete Callbacks (Unaffected by interaction_check)
 
     async def _autocomplete_all_servers(
         self,
@@ -158,7 +158,7 @@ class GameAdmin(
         except discord.HTTPException:
             log.exception("Failed to send to log channel")
 
-    # --- Commands ---
+    # Commands
 
     @app_commands.command(name="list", description="Shows the status of all managed servers.")
     async def list_servers(self, interaction: discord.Interaction) -> None:
@@ -336,7 +336,7 @@ class GameAdmin(
             color=discord.Color.purple(),
         )
 
-    # --- Centralized Error Handler ---
+    # Centralized Error Handler
 
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
         """Handle errors for all commands in this cog."""

@@ -15,7 +15,7 @@ import requests
 if TYPE_CHECKING:
     from collections.abc import Generator
 
-# --- Configuration ---
+# Configuration
 try:
     BOT_TOKEN = os.environ["TOKEN"]
     CHANNEL_ID = os.environ["JOIN_LEAVE_LOG_CHANNEL_ID"]
@@ -115,7 +115,7 @@ def save_results(data: list[tuple[datetime, int]]) -> None:
     output_dir = Path("output")
     output_dir.mkdir(exist_ok=True)
 
-    # --- Save CSV ---
+    # Save CSV
     csv_path = output_dir / "counts.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -123,7 +123,7 @@ def save_results(data: list[tuple[datetime, int]]) -> None:
         writer.writerows([date.strftime("%Y-%m-%dT%H:%M"), count] for date, count in data)
     print(f"Saved {len(data)} records to {csv_path}")
 
-    # --- Save JSON ---
+    # Save JSON
     json_path = output_dir / "counts.json"
     json_data = [{"date": date.strftime("%Y-%m-%dT%H:%M"), "value": value} for date, value in reversed(data)]
     with json_path.open("w", encoding="utf-8") as f:

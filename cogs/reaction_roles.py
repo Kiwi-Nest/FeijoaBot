@@ -58,7 +58,7 @@ class ReactionRoles(commands.Cog):
 
     def __init__(self, bot: KiwiBot) -> None:
         self.bot = bot
-        # --- Message Caching ---
+        # Message Caching
         self.analysis_cache: dict[MessageId, list[AnalysisResult]] = {}
         self.MAX_CACHE_SIZE = 128
         self.COOLDOWN_DURATION = 1.5  # seconds

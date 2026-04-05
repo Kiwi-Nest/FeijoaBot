@@ -6,7 +6,9 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, GuildInteraction, NonNegativeInt, PositiveInt, UserId
+from modules.errors import InsufficientFunds
 from modules.exceptions import UserError
+from modules.result import Err, Ok
 
 if TYPE_CHECKING:
     from modules.ConfigDB import ConfigDB
@@ -146,31 +148,30 @@ class AdminEconomy(
         amount: app_commands.Range[int, 1, 100_000],
     ) -> None:
         """Burn currency from a user."""
-        new_bal = await self.user_db.burn_currency(
+        match await self.user_db.burn_currency(
             UserId(member.id),
             GuildId(interaction.guild.id),
             PositiveInt(amount),
             "ADMIN_REMOVE",
             self.ledger_db,
             UserId(interaction.user.id),
-        )
-        if new_bal is None:
-            msg = f"User has insufficient funds to burn ${amount:,}."
-            raise UserError(msg)
-
-        await self._log_economy_action(
-            title="Economy: Burn",
-            color=discord.Colour.brand_red(),
-            member=member,
-            moderator=interaction.user,
-            amount=f"${amount:,}",
-            guild_id=GuildId(interaction.guild.id),
-            details=f"**New Balance:** ${new_bal:,}",
-        )
-
-        await interaction.response.send_message(
-            f"🔥 Burned ${amount:,} from {member.mention}. New Balance: ${new_bal:,}",
-        )
+        ):
+            case Err(InsufficientFunds(available, _)):
+                msg = f"User has insufficient funds to burn ${amount:,}. They have ${available:,}."
+                raise UserError(msg)
+            case Ok(new_bal):
+                await self._log_economy_action(
+                    title="Economy: Burn",
+                    color=discord.Colour.brand_red(),
+                    member=member,
+                    moderator=interaction.user,
+                    amount=f"${amount:,}",
+                    guild_id=GuildId(interaction.guild.id),
+                    details=f"**New Balance:** ${new_bal:,}",
+                )
+                await interaction.response.send_message(
+                    f"🔥 Burned ${amount:,} from {member.mention}. New Balance: ${new_bal:,}",
+                )
 
     @app_commands.command(
         name="wealth-tax",

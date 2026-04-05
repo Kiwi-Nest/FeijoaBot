@@ -234,7 +234,7 @@ class Moderate(
                 member.id,
             )
 
-    # --- MODERATION COMMANDS ---
+    # MODERATION COMMANDS
 
     @app_commands.command(name="ban", description="Bans a user from the server.")
     @app_commands.checks.has_permissions(ban_members=True)  # Still need specific perm

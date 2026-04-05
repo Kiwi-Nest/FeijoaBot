@@ -476,7 +476,7 @@ class Config(
         # Friendly response with flag if possible, though simple bold text is fine as per spec
         await interaction.response.send_message(f"✅ Server language set to **{lang}**.")
 
-    # --- Sub-group for Forwarding Config ---
+    # Sub-group for Forwarding Config
     forward = app_commands.Group(
         name="forward",
         description="Configure message forwarding settings.",
@@ -562,7 +562,7 @@ class Config(
             ephemeral=True,
         )
 
-    # --- Sub-group for Pruning Config ---
+    # Sub-group for Pruning Config
     prune = app_commands.Group(
         name="prune",
         description="Configure automatic pruning settings.",

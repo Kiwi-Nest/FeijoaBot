@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# --- Configuration ---
+# Configuration
 # Define your guild ID here. Using a constant is best practice.
 GUILD_ID: Final[int] = int(os.getenv("SWL_GUILD_ID", "0"))
 GUILD: Final[Object] = Object(GUILD_ID)

@@ -63,3 +63,7 @@ tzbot4py = { git = "https://github.com/m3z0id/TZBot4PY.git", rev = "v1.0.1" }
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.pyright]
+pythonVersion = "3.14"
+typeCheckingMode = "strict"

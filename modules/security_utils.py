@@ -63,14 +63,14 @@ VERIFIED_ROLE_PERMISSIONS: Final[Permissions] = Permissions(
 )
 
 
-# --- Custom Exception ---
+# Custom Exception
 
 
 class SecurityCheckError(Exception):
     """Base exception for a failed security validation."""
 
 
-# --- Check Functions (Return ValidationResult) ---
+# Check Functions (Return ValidationResult)
 # These hold the actual validation logic and return a result object.
 # Use these in background/automated contexts where you need to handle
 # failures gracefully (e.g., loops, event handlers).
@@ -208,7 +208,7 @@ def check_moderation_action(
     return ValidationResult(True)
 
 
-# --- Ensure Functions (Raise Exceptions) ---
+# Ensure Functions (Raise Exceptions)
 # These are thin wrappers that call check_* and raise SecurityCheckError if not OK.
 # Use these in interactive command contexts where you want to abort on failure.
 

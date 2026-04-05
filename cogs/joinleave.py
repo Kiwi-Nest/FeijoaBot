@@ -190,7 +190,7 @@ class JoinLeaveLogCog(commands.Cog):
         if not config.join_leave_log_channel_id:
             return
 
-        # --- Determine Title and Color ---
+        # Determine Title and Color
         if member.flags.did_rejoin:
             title = "Member Rejoined"
             color = discord.Colour.blue()
@@ -201,7 +201,7 @@ class JoinLeaveLogCog(commands.Cog):
         if member.bot:
             title += " [BOT]"
 
-        # --- Build Description ---
+        # Build Description
         member_count = len(
             [m for m in member.guild.members if not m.bot and m.flags.completed_onboarding and len(m.roles) > 1],
         )
@@ -296,7 +296,7 @@ class JoinLeaveLogCog(commands.Cog):
 
         description.append(f"**Roles:** {roles_str}")
 
-        # --- Get Inviter from DB (New) ---
+        # Get Inviter from DB (New)
         if not member.bot:
             try:
                 inviter_id = await self.invites_db.get_inviter_by_invitee(

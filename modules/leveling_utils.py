@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# --- Level Calculation Helpers ---
+# Level Calculation Helpers
 
 
 def get_raw_level(xp: NonNegativeInt) -> float:
@@ -34,7 +34,7 @@ def to_next_level(xp: NonNegativeInt) -> NonNegativeInt:
     return next_level_target_xp - xp
 
 
-# --- UDP Server Protocol ---
+# UDP Server Protocol
 class LevelBotProtocol(asyncio.DatagramProtocol):
     """Handle incoming UDP packets for the leveling system."""
 

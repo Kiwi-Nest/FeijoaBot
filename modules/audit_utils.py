@@ -79,7 +79,7 @@ class AuditReport:
 # All audit functions return a list of issues, which can be aggregated into an AuditReport
 type AuditResult = list[AuditIssue]
 
-# --- Enhanced Audit Functions ---
+# Enhanced Audit Functions
 
 
 def _check_fake_admin_roles(guild: discord.Guild) -> AuditResult:
@@ -476,14 +476,12 @@ def check_dangerous_roles(guild: discord.Guild, config: GuildConfig) -> AuditRes
     results.extend(perm_issues)
 
     # 2. Specific Muted Role Checks
-    if muted_role and (
-        muted_role.permissions.send_messages or muted_role.permissions.add_reactions or muted_role.permissions.speak
-    ):
+    if muted_role and muted_role.permissions.value != 0:
         results.append(
             AuditIssue(
                 category="Critical Muted Role Issue",
                 entities=[muted_role],
-                details=f"Muted Role ({muted_role.mention}) can talk/react/speak!",
+                details=f"Muted Role ({muted_role.mention}) has permissions set - it must have none.",
             ),
         )
 
@@ -534,7 +532,8 @@ def check_risky_overwrites(guild: discord.Guild, config: GuildConfig) -> AuditRe
         # Check for mute bypass
         if muted_role:
             overwrites = channel.overwrites_for(muted_role)
-            if overwrites.send_messages or overwrites.add_reactions or overwrites.speak:
+            allow, _ = overwrites.pair()
+            if allow.value != 0:
                 mute_bypass_channels.append(channel)
 
         # Check for @everyone/@here spam risk
@@ -547,7 +546,7 @@ def check_risky_overwrites(guild: discord.Guild, config: GuildConfig) -> AuditRe
             AuditIssue(
                 category="Mute Bypass",
                 entities=mute_bypass_channels,
-                details=(f"{muted_role.mention} can talk/react/speak here." if muted_role else "Muted role issue"),
+                details=(f"{muted_role.mention} has permissions granted here." if muted_role else "Muted role issue"),
             ),
         )
 

@@ -7,12 +7,7 @@ import discord
 from discord import Forbidden, HTTPException, MissingApplicationID
 from discord.app_commands import CommandSyncFailure, TranslationError
 from discord.ext import commands
-from discord.ext.commands import (
-    ExtensionAlreadyLoaded,
-    ExtensionFailed,
-    ExtensionNotFound,
-    NoEntryPointError,
-)
+from discord.ext.commands import ExtensionAlreadyLoaded, ExtensionFailed, ExtensionNotFound, NoEntryPointError
 
 from modules.ConfigDB import ConfigDB
 from modules.CurrencyLedgerDB import CurrencyLedgerDB
@@ -123,7 +118,7 @@ class KiwiBot(commands.Bot):
                     )
 
         try:
-            from tzbot4py import TZBot, TZFlags
+            from tzbot4py import TZBot, TZFlags  # noqa: PLC0415
 
             if not (self.config.tzbot_host and self.config.tzbot_port and self.config.tzbot_api_key):
                 log.warning("TZBot support is enabled but it's not configured! Falling back to defaults...")

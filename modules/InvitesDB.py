@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# --- Configuration & Session ---
+# Configuration & Session
 TOKEN = os.getenv("TOKEN")
 API_HEADERS = {
     "Authorization": f"Bot {TOKEN}",
@@ -175,7 +175,7 @@ class InvitesDB:
                 return UserId(row[0])
             return None
 
-    # --- Discord Raw API Operations ---
+    # Discord Raw API Operations
 
     async def get_member_details_api(self, username: str, guild_id: GuildId) -> dict[str, Any] | None:
         """Find a specific member by username and returns the one that joined most recently."""

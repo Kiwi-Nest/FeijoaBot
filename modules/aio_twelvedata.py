@@ -6,18 +6,18 @@ from typing import TYPE_CHECKING, Any, Self  # Self requires Python 3.11+
 
 import aiohttp  # Ensure aiohttp is installed: pip install aiohttp
 
-# --- Type Hinting Setup ---
+# Type Hinting Setup
 type Ticker = str
 type Price = float
 
-# --- Logging ---
+# Logging
 log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     import types
 
 
-# --- Custom Exceptions ---
+# Custom Exceptions
 class AioTwelveDataError(Exception):
     """Base exception for this module."""
 
@@ -41,7 +41,7 @@ class AioTwelveDataRequestError(AioTwelveDataError, ConnectionError):
     """Represents network or request-related errors (timeout, connection refused)."""
 
 
-# --- Client Class ---
+# Client Class
 class AioTwelveDataClient:
     """Asynchronous client for interacting with select Twelve Data API endpoints."""
 
@@ -218,7 +218,7 @@ class AioTwelveDataClient:
         else:
             return None
 
-    # --- Public API Methods ---
+    # Public API Methods
 
     async def get_batch_prices(
         self,
@@ -252,7 +252,7 @@ class AioTwelveDataClient:
                 },
             )
 
-            # --- Parse the batch response ---
+            # Parse the batch response
             # API return is a dictionary keyed by symbol, like time_series batch responses:
             if isinstance(data, dict):
                 for ticker in unique_tickers:

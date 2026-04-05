@@ -3,13 +3,13 @@ from __future__ import annotations  # Defer type annotation evaluation
 import logging
 from typing import TYPE_CHECKING, Final
 
-# --- Discord Imports ---
+# Discord Imports
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 from discord.utils import format_dt  # For formatting timestamps
 
-# --- Local Imports ---
+# Local Imports
 from modules.dtypes import PositiveInt, UserId
 from modules.guild_cog import GuildOnlyHybridCog
 from modules.trading_logic import (
@@ -25,21 +25,21 @@ if TYPE_CHECKING:
     from modules.KiwiBot import KiwiBot
 
 
-# --- Type Hinting ---
+# Type Hinting
 type Ticker = str
 type Quantity = int | float
 type Price = float
 
-# --- Logging ---
+# Logging
 log = logging.getLogger(__name__)
 
-# --- Choices for App Commands ---
+# Choices for App Commands
 ALLOWED_TICKER_CHOICES = [app_commands.Choice(name=ticker, value=ticker) for ticker in sorted(ALLOWED_STOCKS)]
 
 SECOND_COOLDOWN: Final[int] = 1
 
 
-# --- Discord Cog ---
+# Discord Cog
 class PaperTradingCog(GuildOnlyHybridCog):
     """Discord Cog for paper trading frontend interactions."""
 
@@ -99,7 +99,7 @@ class PaperTradingCog(GuildOnlyHybridCog):
             market_status += f" | Opens {format_dt(next_open, 'R')}"
         return market_status
 
-    # --- Commands ---
+    # Commands
     @commands.hybrid_command(name="buy", description="Buy shares of a stock.")
     @commands.cooldown(1, SECOND_COOLDOWN, commands.BucketType.user)
     @app_commands.choices(ticker=ALLOWED_TICKER_CHOICES)
@@ -539,7 +539,7 @@ All are leveraged ETFs and are intended for short-term trading.",
         await self.bot.wait_until_ready()
 
 
-# --- Cog Setup Function ---
+# Cog Setup Function
 async def setup(bot: KiwiBot) -> None:
     """Cog setup function called by discord.py."""
     if not bot.trading_logic:

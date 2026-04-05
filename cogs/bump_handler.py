@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# --- Constants ---
+# Constants
 BUMP_REMINDER_DELAY = datetime.timedelta(hours=2)
 BACKUP_REMINDER_DELAY = datetime.timedelta(minutes=10)
 
@@ -126,7 +126,7 @@ class BumpHandlerCog(commands.Cog):
                     f"🎉 Thanks for your {format_ordinal(new_bump_count)} bump, {bumper.mention}! You've received **${reward}**.",
                 )
 
-            # --- Unified Reminder Scheduling ---
+            # Unified Reminder Scheduling
             if is_new_bump:
                 delay_seconds = BUMP_REMINDER_DELAY.total_seconds()
             else:

@@ -132,7 +132,7 @@ class Reminders(commands.Cog):
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            # --- FIRE REMINDER LOGIC ---
+            # FIRE REMINDER LOGIC
             # 1. Send the Message
             # Unpack data safely (ignoring the 6th element which varies between get_next_reminder and get_due_reminders)
             message_id, user_id, guild_id, channel_id, msg_content = reminder_data[:5]
@@ -225,7 +225,7 @@ class Reminders(commands.Cog):
             except Exception:  # noqa: BLE001
                 log.warning("Reminder %s failed to deliver even to DM.", message_id)
 
-    # --- Helper: Time Parsing Logic ---
+    # Helper: Time Parsing Logic
     def _parse_time(self, text: str, tz: ZoneInfo) -> tuple[datetime | None, str]:
         """Parse text to find a date relative to the given timezone using dateparser."""
         now_in_tz = datetime.now(tz)
@@ -264,11 +264,11 @@ class Reminders(commands.Cog):
 
         return dt, clean_text
 
-    # --- Helper: Get timezone either from TZBot or local database ---
+    # Helper: Get timezone either from TZBot or local database
     async def _get_timezone(self, user_id: UserId, guild_id: GuildId) -> ZoneInfo:
         tz: ZoneInfo | None = None
         if self.bot.tzbot:
-            from tzbot4py import TimezoneFromUserIDData, TZRequest
+            from tzbot4py import TimezoneFromUserIDData, TZRequest  # noqa: PLC0415
 
             request = await self.bot.tzbot.make_request(TZRequest(TimezoneFromUserIDData(user_id)))
             if request.is_successful():
@@ -403,7 +403,7 @@ class Reminders(commands.Cog):
             await interaction.followup.send(f"💤 Snoozed for {minutes}m! (Due: <t:{ts}:R>)", ephemeral=True)
             await interaction.message.delete()
 
-    # --- Slash Command ---
+    # Slash Command
     reminders_group = app_commands.Group(name="reminders", description="Manage your reminders")
 
     @reminders_group.command(name="list", description="List your active reminders.")

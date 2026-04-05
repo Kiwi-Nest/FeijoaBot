@@ -134,7 +134,7 @@ class AutoTranslate(commands.Cog):
         if len(self.msg_context_cache) > self.MAX_CACHE_SIZE:
             self.msg_context_cache.popitem(last=False)
 
-    # --- Slash Commands for Configuration ---
+    # Slash Commands for Configuration
 
     @app_commands.command(
         name="language",
@@ -462,7 +462,7 @@ class AutoTranslate(commands.Cog):
 
         return (source_lang, target_lang)
 
-    # --- Event Listeners ---
+    # Event Listeners
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:

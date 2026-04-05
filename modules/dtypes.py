@@ -2,7 +2,7 @@ from typing import Literal, NewType, TypeIs, cast
 
 import discord
 
-# --- Nominal Types for Discord IDs ---
+# Nominal Types for Discord IDs
 # Using NewType creates distinct types that are not interchangeable.
 # A function expecting a GuildId will raise a type error if given a UserId.
 UserId = NewType("UserId", int)
@@ -12,11 +12,11 @@ RoleId = NewType("RoleId", int)
 MessageId = NewType("MessageId", int)
 type RoleIdList = list[RoleId]
 
-# --- Semantic Type Aliases ---
+# Semantic Type Aliases
 # For complex types that appear in multiple places.
 type UserGuildPair = tuple[UserId, GuildId]
 
-# --- Literals for Closed Sets of Values ---
+# Literals for Closed Sets of Values
 # Enforces that a variable must be one of these specific string values.
 type ReminderPreference = Literal["ONCE", "ALWAYS", "NEVER"]
 type AnalysisStatus = Literal["OK", "ERROR", "WARN"]

@@ -30,11 +30,11 @@ if TYPE_CHECKING:
     from pathlib import Path
     from types import TracebackType
 
-# --- Basic Setup ---
+# Basic Setup
 log = logging.getLogger(__name__)
 
 
-# --- Custom Exceptions ---
+# Custom Exceptions
 class ServerAdminError(Exception):
     """Base exception for all errors in this library."""
 
@@ -71,7 +71,7 @@ class RCONConnectionError(ServerAdminError):
     """Raised when an RCON connection fails."""
 
 
-# --- Data Structures ---
+# Data Structures
 class ServerStatus(Enum):
     """Represents the discovered status of a server."""
 
@@ -92,7 +92,7 @@ class ServerInfo:
     rcon_enabled: bool
 
 
-# --- The Main Library Class ---
+# The Main Library Class
 class ServerManager:
     """Manager for discovering and administrating servers."""
 
@@ -149,7 +149,7 @@ class ServerManager:
                 await self._background_task
             log.info("ServerManager background task shut down.")
 
-    # --- Public Properties for State Access ---
+    # Public Properties for State Access
 
     @property
     def online_servers(self) -> tuple[str, ...]:
@@ -170,7 +170,7 @@ class ServerManager:
         """Return a copy of the internal server information dictionary."""
         return self._servers.copy()
 
-    # --- Public Methods for Actions ---
+    # Public Methods for Actions
 
     async def start(self, server_name: str) -> None:
         """Start a server by running its tmux.sh script."""
@@ -263,7 +263,7 @@ class ServerManager:
             await self._perform_scan_and_update()
             log.info("Manual refresh complete.")
 
-    # --- Internal Background Loop and Helpers ---
+    # Internal Background Loop and Helpers
 
     def _schedule_refresh(self, delay: float = 0) -> None:
         """Schedule a refresh to run after a specified delay."""

@@ -23,6 +23,8 @@ from modules.dtypes import (
     UserId,
 )
 from modules.enums import StatName
+from modules.errors import BurnError, InsufficientFunds, SelfTransfer, TransferError
+from modules.result import Err, Ok, Result
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -366,10 +368,10 @@ class UserDB:
         event_reason: EventReason,
         ledger_db: CurrencyLedgerDB,
         initiator_id: UserId,
-    ) -> int | None:
+    ) -> Result[int, BurnError]:
         """Atomically decrement a user's currency if they have sufficient funds.
 
-        Logs it as a BURN event. Returns the new balance or None on failure.
+        Logs it as a BURN event. Returns Ok(new_balance) or Err(InsufficientFunds).
         """
         sql = f"""
             UPDATE {self.USERS_TABLE}
@@ -383,9 +385,14 @@ class UserDB:
                 new_value_row = await cursor.fetchone()
 
                 if new_value_row is None:
-                    # Insufficient funds, or user not found. Rollback.
+                    bal_cursor = await conn.execute(
+                        f"SELECT currency FROM {self.USERS_TABLE} WHERE discord_id = ? AND guild_id = ?",  # noqa: S608
+                        (user_id, guild_id),
+                    )
+                    bal_row = await bal_cursor.fetchone()
+                    available = NonNegativeInt(bal_row[0] if bal_row else 0)
                     await conn.rollback()
-                    return None
+                    return Err(InsufficientFunds(available=available, required=amount))
 
                 await ledger_db.log_event(
                     conn=conn,
@@ -399,7 +406,7 @@ class UserDB:
                 )
 
                 await conn.commit()
-                return int(new_value_row[0])
+                return Ok(int(new_value_row[0]))
 
             except Exception:
                 await conn.rollback()
@@ -576,8 +583,11 @@ class UserDB:
         guild_id: GuildId,
         amount: PositiveInt,
         ledger_db: CurrencyLedgerDB,
-    ) -> bool:
+    ) -> Result[None, TransferError]:
         """Atomically transfers currency and logs the transaction."""
+        if sender_id == receiver_id:
+            return Err(SelfTransfer())
+
         async with self.database.get_conn() as conn:
             try:
                 # 1. Check sender's balance and decrement in one atomic step
@@ -587,7 +597,14 @@ class UserDB:
                     (amount, sender_id, guild_id, amount),
                 )
                 if cursor.rowcount == 0:
-                    return False  # Insufficient funds or user not found
+                    bal_cursor = await conn.execute(
+                        f"SELECT currency FROM {self.USERS_TABLE} WHERE discord_id = ? AND guild_id = ?",  # noqa: S608
+                        (sender_id, guild_id),
+                    )
+                    bal_row = await bal_cursor.fetchone()
+                    available = NonNegativeInt(bal_row[0] if bal_row else 0)
+                    await conn.rollback()
+                    return Err(InsufficientFunds(available=available, required=amount))
 
                 # 2. Increment receiver's balance (UPSERT to be safe)
                 await conn.execute(
@@ -619,9 +636,9 @@ class UserDB:
                     receiver_id,
                     amount,
                 )
-                return False
+                raise
             else:
-                return True
+                return Ok(None)
 
     async def get_leaderboard(
         self,

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
-# --- Constants ---
+# Constants
 COOLDOWN_SECONDS: Final[int] = 5 * 60
 LONG_ABSENCE_BONUS_HOURS: Final[int] = 6
 lowercase_letters = set(string.ascii_lowercase)

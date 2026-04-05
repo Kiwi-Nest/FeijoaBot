@@ -21,7 +21,7 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
-# --- Local Imports ---
+# Local Imports
 if TYPE_CHECKING:
     import aiohttp
     import aiosqlite
@@ -37,11 +37,11 @@ from modules.CurrencyLedgerDB import COLLATERAL_POOL_ID, SYSTEM_USER_ID
 from modules.enums import StatName
 from modules.exceptions import UserError
 
-# --- Logging ---
+# Logging
 log = logging.getLogger(__name__)
 
 
-# --- Constants ---
+# Constants
 # Tier 1: Only allowed stocks given rate limit
 ALLOWED_STOCKS: Final[set[Ticker]] = {
     "TQQQ",
@@ -130,7 +130,7 @@ class PriceCache:
                 "Cache is empty" if is_empty else "Intelligent TTL expired",
             )
 
-            # --- API Call 1: Market State (Uses 1 API credit) ---
+            # API Call 1: Market State (Uses 1 API credit)
             market_state = await self.api_client.get_market_state("NASDAQ")
 
             if market_state is None:
@@ -151,11 +151,11 @@ class PriceCache:
 
             # 3. Decide action based on market state
             if is_open:
-                # --- MARKET IS OPEN ---
+                # MARKET IS OPEN
                 self._next_market_open = None
                 # We must refresh prices
                 log.info("Market is OPEN. Refreshing batch prices.")
-                # --- API Call 2: Batch Prices (Uses 7 API credits) ---
+                # API Call 2: Batch Prices (Uses 7 API credits)
                 try:
                     price_map = await self.api_client.get_batch_prices(ALLOWED_STOCKS)
                     update_time = datetime.datetime.now(datetime.UTC)
@@ -181,7 +181,7 @@ class PriceCache:
                     log.warning("Serving stale prices due to batch price API error.")
 
             else:
-                # --- MARKET IS CLOSED ---
+                # MARKET IS CLOSED
                 log.info("Market is CLOSED. Serving existing prices.")
 
                 # If cache is empty (cold start), we must fetch prices once
@@ -190,7 +190,7 @@ class PriceCache:
                         "Cold start: Fetching initial prices while market is closed.",
                     )
                     try:
-                        # --- API Call 2 (Cold Start): Batch Prices (7 credits) ---
+                        # API Call 2 (Cold Start): Batch Prices (7 credits)
                         price_map = await self.api_client.get_batch_prices(
                             ALLOWED_STOCKS,
                         )
@@ -254,7 +254,7 @@ class PriceCache:
         return self._next_market_open
 
 
-# --- Custom Exceptions (can be shared or defined here) ---
+# Custom Exceptions (can be shared or defined here)
 
 
 class InsufficientFundsError(UserError):
@@ -269,7 +269,7 @@ class PriceNotAvailableError(UserError):
     """Raised when a known ticker's price is not in the cache (e.g., pending update)."""
 
 
-# --- Middleware Class ---
+# Middleware Class
 class TradingLogic:
     """Handle interactions with the trading data API and database.
 
@@ -707,7 +707,7 @@ class TradingLogic:
                     is_partial_close,
                 )
 
-    # --- Other Business Logic (e.g., portfolio P&L calculation) ---
+    # Other Business Logic (e.g., portfolio P&L calculation)
     def is_market_open(self) -> bool:
         """Pass-through check to see if the US market is currently open based on the last API check."""
         # This now correctly checks the *cached* API state
@@ -846,7 +846,7 @@ class TradingLogic:
                 price_change_pct = (float(current_price) / entry) - 1.0
                 pnl = notional * price_change_pct
 
-                # --- THIS IS THE MARGIN CALL ---
+                # THIS IS THE MARGIN CALL
                 if pnl <= -collateral:
                     # The loss has exceeded or equaled the collateral.
                     positions_to_close.append((pos_id, user_id, guild_id, ticker, pnl))

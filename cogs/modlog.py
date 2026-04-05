@@ -263,7 +263,7 @@ class ModLogCog(commands.Cog):
                     include_reason=False,
                 )
 
-        # --- Muted Role Tracking ---
+        # Muted Role Tracking
         muted_role_id = config.muted_role_id
         if muted_role_id and before.roles != after.roles:
             muted_role = after.guild.get_role(muted_role_id)
