@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 import discord
 from discord import app_commands
 from discord.app_commands import AppCommandGroup, Command, ContextMenu, Group
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 from modules.help_command import FeijoaCommand
 
@@ -20,9 +20,7 @@ class Help(commands.Cog):
     def __init__(self, bot: KiwiBot) -> None:
         self.bot = bot
         self.command_list = {}
-        self.refresh_command_list.start()
 
-    @tasks.loop(minutes=10)
     async def refresh_command_list(self) -> None:  # noqa: PLR0912 - Command fetching requires multiple type checks and error handling
         log.info("Command list is being refreshed...")
 
@@ -76,11 +74,6 @@ class Help(commands.Cog):
                 new_command_list[server.qualified_name] = FeijoaCommand.from_app_subcommand((local, server))
 
         self.command_list = new_command_list
-
-    @refresh_command_list.before_loop
-    async def before_refresh_command_list(self) -> None:
-        """Wait for the bot to be ready before starting the loop."""
-        await self.bot.wait_until_ready()
 
     async def command_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         return [

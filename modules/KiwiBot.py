@@ -1,6 +1,6 @@
 import logging
 import pathlib
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 import aiohttp
 import discord
@@ -25,6 +25,7 @@ from modules.trading_logic import TradingLogic
 from modules.UserDB import UserDB
 
 if TYPE_CHECKING:
+    from cogs.help import Help
     from modules.config import BotConfig
 
 log = logging.getLogger(__name__)
@@ -206,6 +207,9 @@ class KiwiBot(commands.Bot):
         ):
             log.exception("Error syncing global commands")
 
+        finally:
+            await self.refresh_help()
+
     async def on_guild_join(self, guild: discord.Guild) -> None:
         """Send a welcome and setup guide when joining a new guild."""
         log.info("Joined new guild: %s (%s)", guild.name, guild.id)
@@ -257,3 +261,11 @@ class KiwiBot(commands.Bot):
             log.info("Closed shared aiohttp session.")
         log.info("Closing bot gracefully.")
         await super().close()
+
+    async def refresh_help(self) -> None:
+        help_instance = self.get_cog("Help")
+        if not help_instance:
+            log.warning("Help cog not found. Cannot refresh command list.")
+            return
+
+        await cast("Help", help_instance).refresh_command_list()
