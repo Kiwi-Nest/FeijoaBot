@@ -202,8 +202,14 @@ class JoinLeaveLogCog(commands.Cog):
             title += " [BOT]"
 
         # Build Description
+        # Only filter by completed_onboarding if any members have completed it
+        any_completed = any(m.flags.completed_onboarding for m in member.guild.members if not m.bot)
         member_count = len(
-            [m for m in member.guild.members if not m.bot and m.flags.completed_onboarding and len(m.roles) > 1],
+            [
+                m
+                for m in member.guild.members
+                if not m.bot and len(m.roles) > 1 and (not any_completed or m.flags.completed_onboarding)
+            ],
         )
 
         description = [
