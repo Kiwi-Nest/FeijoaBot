@@ -15,6 +15,8 @@ import logging
 from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, ClassVar, Self
 
+import aiosqlite
+
 from .dtypes import RoleId
 
 if TYPE_CHECKING:  # For type hinting only, avoids circular imports
@@ -40,11 +42,14 @@ class GuildConfig:
     verified_role_id: RoleId | None = None
     automute_role_id: RoleId | None = None
     xp_opt_out_role_id: RoleId | None = None
+    inactive_role_id: RoleId | None = None
     roles_to_prune: RoleIdList | None = None
     # Server Stats
     member_count_channel_id: ChannelId | None = None
     tag_role_id: RoleId | None = None
     tag_role_channel_id: ChannelId | None = None
+    # Inactive Role
+    inactive_role_threshold_days: int = 50
     # Pruning
     inactivity_days: int = 14
     custom_role_prefix: str = "Custom: "
@@ -116,6 +121,8 @@ class ConfigDB:
                                                 automute_role_id < 10000000000000000000),
                     xp_opt_out_role_id      INTEGER CHECK(xp_opt_out_role_id > 1000000 AND
                                                 xp_opt_out_role_id < 10000000000000000000),
+                    inactive_role_id        INTEGER CHECK(inactive_role_id > 1000000 AND
+                                                inactive_role_id < 10000000000000000000),
 
                     -- Server Stats Channel/Role IDs (Nullable)
                     member_count_channel_id INTEGER CHECK(member_count_channel_id > 1000000 AND
@@ -124,6 +131,9 @@ class ConfigDB:
                                                 tag_role_id < 10000000000000000000),
                     tag_role_channel_id     INTEGER CHECK(tag_role_channel_id > 1000000 AND
                                                 tag_role_channel_id < 10000000000000000000),
+
+                    -- Inactive Role Settings
+                    inactive_role_threshold_days INTEGER NOT NULL DEFAULT 50 CHECK(inactive_role_threshold_days > 0),
 
                     -- Pruning Settings
                     roles_to_prune          TEXT, -- Comma-separated list of role IDs
@@ -143,6 +153,15 @@ class ConfigDB:
                 ) STRICT, WITHOUT ROWID;
                 """,
             )
+            for col_sql in [
+                "ALTER TABLE guild_configs ADD COLUMN inactive_role_id INTEGER",
+                "ALTER TABLE guild_configs ADD COLUMN inactive_role_threshold_days INTEGER NOT NULL DEFAULT 50",
+            ]:
+                try:
+                    await conn.execute(col_sql)
+                except aiosqlite.OperationalError as e:
+                    if "duplicate column" not in str(e):
+                        raise
             await conn.commit()
             log.info("Initialized guild_configs database table.")
 

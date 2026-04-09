@@ -8,8 +8,8 @@ from modules.dtypes import GuildId
 from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
 
 # Set up basic logging
 log = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ UPDATE_INTERVAL_MINUTES = 5
 class ServerStats(GuildOnlyHybridCog):
     """A cog that automatically updates server statistics in designated voice channels."""
 
-    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
+    def __init__(self, bot: BotCore, *, config_db: ConfigDB) -> None:
         self.bot = bot
         self.config_db = config_db
         self.update_stats.start()
@@ -121,6 +121,6 @@ class ServerStats(GuildOnlyHybridCog):
         await self.bot.wait_until_ready()
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the cog to the bot."""
     await bot.add_cog(ServerStats(bot, config_db=bot.config_db))

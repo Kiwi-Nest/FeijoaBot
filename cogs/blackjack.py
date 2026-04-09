@@ -21,8 +21,8 @@ from modules.result import Err, Ok
 if TYPE_CHECKING:
     from discord import Interaction
 
+    from modules.BotCore import BotCore
     from modules.CurrencyLedgerDB import CurrencyLedgerDB, EventReason
-    from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
 SECOND_COOLDOWN: Final[int] = 1
@@ -82,7 +82,7 @@ class BlackjackView(discord.ui.View):
 
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         user: discord.User | discord.Member,
         bet: int,
         *,
@@ -624,7 +624,7 @@ blackjack_stats: defaultdict[int, defaultdict[int, dict[str, int]]] = defaultdic
 
 
 class BlackjackCog(GuildOnlyHybridCog):
-    def __init__(self, bot: KiwiBot, *, user_db: UserDB, ledger_db: CurrencyLedgerDB) -> None:
+    def __init__(self, bot: BotCore, *, user_db: UserDB, ledger_db: CurrencyLedgerDB) -> None:
         self.bot = bot
         self.user_db = user_db
         self.ledger_db = ledger_db
@@ -729,5 +729,5 @@ class BlackjackCog(GuildOnlyHybridCog):
         await ctx.send(embed=embed, ephemeral=True)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     await bot.add_cog(BlackjackCog(bot, user_db=bot.user_db, ledger_db=bot.ledger_db))

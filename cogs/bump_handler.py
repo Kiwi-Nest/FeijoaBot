@@ -13,9 +13,9 @@ from modules.enums import StatName
 from modules.utils import format_ordinal
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
     from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class BumpHandlerCog(commands.Cog):
 
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         *,
         user_db: UserDB,
         config_db: ConfigDB,
@@ -287,7 +287,7 @@ class BumpHandlerCog(commands.Cog):
         )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Load the cog."""
     if not bot.config.disboard_bot_id:
         log.error("BumpHandlerCog not loaded: DISBOARD_BOT_ID is not configured.")

@@ -11,9 +11,9 @@ from modules.exceptions import UserError
 from modules.result import Err, Ok
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
     from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
 
@@ -27,7 +27,7 @@ class AdminEconomy(
 ):
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         *,
         user_db: UserDB,
         ledger_db: CurrencyLedgerDB,
@@ -208,7 +208,7 @@ class AdminEconomy(
         )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     await bot.add_cog(
         AdminEconomy(
             bot,

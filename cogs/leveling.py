@@ -17,8 +17,8 @@ from modules.leveling_utils import LevelBotProtocol, get_level, to_next_level
 from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_role_safety
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ class LevelingCog(GuildOnlyHybridCog):
 
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         *,
         host: str | None,
         udp_port: int | None,
@@ -424,7 +424,7 @@ class LevelingCog(GuildOnlyHybridCog):
         )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the LevelingCog to the bot."""
     await bot.add_cog(
         LevelingCog(

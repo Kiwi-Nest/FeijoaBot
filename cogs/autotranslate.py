@@ -21,9 +21,9 @@ from modules.translation import TranslationClient
 if TYPE_CHECKING:
     import aiohttp
 
+    from modules.BotCore import BotCore
     from modules.config import BotConfig
     from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ class AutoTranslate(commands.Cog):
 
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         *,
         config: BotConfig,
         http_session: aiohttp.ClientSession,
@@ -570,7 +570,7 @@ class AutoTranslate(commands.Cog):
                 await message.reply(f"{crumb} {translation}", mention_author=False)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Load the AutoTranslate cog."""
     await bot.add_cog(
         AutoTranslate(

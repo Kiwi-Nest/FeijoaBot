@@ -12,7 +12,7 @@ from modules.dtypes import AnalysisStatus, MessageId, is_guild_message
 from modules.security_utils import check_bot_hierarchy, check_verifiable_role
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
 
 # A structured dictionary for analysis results, improving code clarity.
 
@@ -56,7 +56,7 @@ class ReactionRoles(commands.Cog):
     Includes a crucial security check to ensure roles have no permissions.
     """
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: BotCore) -> None:
         self.bot = bot
         # Message Caching
         self.analysis_cache: dict[MessageId, list[AnalysisResult]] = {}
@@ -553,7 +553,7 @@ class ReactionRoles(commands.Cog):
             )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the ReactionRoles cog to the bot."""
     await bot.add_cog(ReactionRoles(bot))
     log.info("ReactionRoles cog loaded.")

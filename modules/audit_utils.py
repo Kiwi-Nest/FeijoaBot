@@ -201,11 +201,13 @@ async def check_invites(guild: discord.Guild) -> AuditResult:
         for invite in invites:
             if invite.max_age == 0 and invite.max_uses == 0:
                 inviter = invite.inviter.mention if invite.inviter else "Unknown"
+                created = discord.utils.format_dt(invite.created_at) if invite.created_at else "Unknown"
+                uses = invite.uses if invite.uses is not None else 0
                 results.append(
                     AuditIssue(
                         category="Infinite Invite",
                         entities=[],  # Invite is not a standard entity we listed, putting details in text
-                        details=f"Code `{invite.code}` by {inviter} never expires and has no use limit.",
+                        details=f"Code `{invite.code}` by {inviter} • Created: {created} • Used {uses} times (never expires, no use limit).",
                     ),
                 )
     except discord.Forbidden:
@@ -309,6 +311,28 @@ def check_server_config(guild: discord.Guild) -> AuditResult:
                 ),
             )
 
+    # Explicit Content Filter Safety
+    if guild.explicit_content_filter == discord.ContentFilter.disabled:
+        results.append(
+            AuditIssue(
+                category="Weak Security",
+                entities=[],
+                details="Explicit content filter is disabled. Recommended: `all_members` or `no_role`.",
+            ),
+        )
+
+    # @everyone Dangerous Permissions
+    dangerous_defaults = [p for p in security_utils.DANGEROUS_PERMISSIONS if getattr(guild.default_role.permissions, p, False)]
+    if dangerous_defaults:
+        formatted = ", ".join(f"`{p}`" for p in dangerous_defaults)
+        results.append(
+            AuditIssue(
+                category="Weak Security",
+                entities=[],
+                details=f"@everyone has dangerous permissions: {formatted}. These apply to all members.",
+            ),
+        )
+
     return results
 
 
@@ -333,6 +357,16 @@ async def check_automod(guild: discord.Guild) -> AuditResult:
                 category="Missing Permissions",
                 entities=[],
                 details="Cannot check AutoMod rules (Missing `Manage Guild`).",
+            ),
+        ]
+
+    # Check if no AutoMod rules are configured at all
+    if not rules:
+        return [
+            AuditIssue(
+                category="Weak Security",
+                entities=[],
+                details="No AutoMod rules configured. Consider enabling keyword filters, spam protection, and mention spam rules.",
             ),
         ]
 
@@ -566,6 +600,10 @@ def check_risky_overwrites(guild: discord.Guild, config: GuildConfig) -> AuditRe
     for channel in guild.channels:
         for target, overwrite in channel.overwrites.items():
             if isinstance(target, (discord.Role, discord.Member)) and overwrite.mention_everyone is True:
+                # Skip managed roles (bot-only, controlled by bot owner)
+                if isinstance(target, discord.Role) and target.managed:
+                    continue
+
                 # If the role/member already has it globally, it's redundant but not a "hidden" risk per se,
                 # but if they do NOT have it globally, this is a dangerous override.
 

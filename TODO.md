@@ -1,8 +1,6 @@
 # High Priority
 
-Auto spam cog "same message in 3+ channels within 5 minutes"
-
-- Trigger automute and warn staff
+Role pings for event coordination
 
 Ticket command
 

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-class KiwiBot(commands.Bot):
+class BotCore(commands.Bot):
     loaded_extensions: ClassVar[list[str]] = []
 
     def __init__(self, config: BotConfig) -> None:

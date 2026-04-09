@@ -1,4 +1,4 @@
-"""Reminders cog for KiwiBot.
+"""Reminders with sqlite3 backend.
 
 If a user deletes a recent reminder message, it will be removed from the database even if snoozed.
 """
@@ -19,7 +19,7 @@ from discord.ext import commands
 from modules.dtypes import ChannelId, GuildId, MessageId, UserId
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
     from modules.ReminderDB import ReminderDB
     from modules.UserDB import UserDB
 
@@ -72,7 +72,7 @@ class SnoozeView(discord.ui.View):
 
 
 class Reminders(commands.Cog):
-    def __init__(self, bot: KiwiBot, *, reminder_db: ReminderDB, user_db: UserDB) -> None:
+    def __init__(self, bot: BotCore, *, reminder_db: ReminderDB, user_db: UserDB) -> None:
         self.bot = bot
         self.reminder_db = reminder_db
         self.user_db = user_db
@@ -445,5 +445,5 @@ class Reminders(commands.Cog):
             )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     await bot.add_cog(Reminders(bot, reminder_db=bot.reminder_db, user_db=bot.user_db))

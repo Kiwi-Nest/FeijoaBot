@@ -21,8 +21,8 @@ from modules.trading_logic import (
 )
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.dtypes import GuildId
-    from modules.KiwiBot import KiwiBot
 
 
 # Type Hinting
@@ -43,7 +43,7 @@ SECOND_COOLDOWN: Final[int] = 1
 class PaperTradingCog(GuildOnlyHybridCog):
     """Discord Cog for paper trading frontend interactions."""
 
-    def __init__(self, bot: KiwiBot, *, trading_logic: TradingLogic) -> None:
+    def __init__(self, bot: BotCore, *, trading_logic: TradingLogic) -> None:
         self.bot = bot
         self.trading_logic = trading_logic
 
@@ -540,7 +540,7 @@ All are leveraged ETFs and are intended for short-term trading.",
 
 
 # Cog Setup Function
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Cog setup function called by discord.py."""
     if not bot.trading_logic:
         log.warning("Skipping loading PaperTradingCog: TradingLogic not initialized.")

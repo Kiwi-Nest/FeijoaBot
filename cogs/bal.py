@@ -10,7 +10,7 @@ from modules.enums import StatName
 from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
     from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
@@ -18,9 +18,9 @@ SECOND_COOLDOWN: Final[int] = 1
 
 
 class Bal(GuildOnlyHybridCog):
-    bot: KiwiBot
+    bot: BotCore
 
-    def __init__(self, bot: KiwiBot, user_db: UserDB) -> None:
+    def __init__(self, bot: BotCore, user_db: UserDB) -> None:
         self.bot = bot
         self.user_db = user_db
 
@@ -56,5 +56,5 @@ class Bal(GuildOnlyHybridCog):
         )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     await bot.add_cog(Bal(bot=bot, user_db=bot.user_db))

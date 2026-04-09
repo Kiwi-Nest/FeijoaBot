@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import textwrap
 from typing import TYPE_CHECKING
 
 import discord
@@ -12,8 +11,8 @@ from discord.ext import commands, tasks
 from modules import audit_utils, security_utils
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +20,46 @@ log = logging.getLogger(__name__)
 # Use the type alias from audit_utils
 AuditReport = audit_utils.AuditReport
 AuditResult = audit_utils.AuditResult
+AuditIssue = audit_utils.AuditIssue
+
+ENTITY_THRESHOLD = 15
+
+
+class IssueEntityView(discord.ui.View):
+    """Paginated view for a single AuditIssue whose entity list exceeds ENTITY_THRESHOLD."""
+
+    def __init__(self, issue: AuditIssue, color: discord.Colour, per_page: int = ENTITY_THRESHOLD) -> None:
+        super().__init__(timeout=300)
+        self.issue = issue
+        self.color = color
+        self.per_page = per_page
+        self.current_page = 0
+        self.max_page = (len(issue.entities) - 1) // per_page
+
+    async def get_embed(self) -> discord.Embed:
+        self.prev_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page >= self.max_page
+
+        start = self.current_page * self.per_page
+        end = start + self.per_page
+        mentions = ", ".join(e.mention for e in self.issue.entities[start:end])
+
+        embed = discord.Embed(title=self.issue.category, color=self.color)
+        if self.issue.details:
+            embed.description = self.issue.details
+        embed.add_field(name="Affected", value=mentions or "None", inline=False)
+        embed.set_footer(text=f"Page {self.current_page + 1}/{self.max_page + 1} · {len(self.issue.entities)} total")
+        return embed
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.secondary, emoji="⬅️")
+    async def prev_button(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        self.current_page = max(0, self.current_page - 1)
+        await interaction.response.edit_message(embed=await self.get_embed(), view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, emoji="➡️")
+    async def next_button(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
+        self.current_page = min(self.max_page, self.current_page + 1)
+        await interaction.response.edit_message(embed=await self.get_embed(), view=self)
 
 
 @commands.guild_only()
@@ -38,7 +77,7 @@ class SecurityAudit(
     For security, all responses should be ephemeral.
     """
 
-    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
+    def __init__(self, bot: BotCore, *, config_db: ConfigDB) -> None:
         """Initialize the SecurityAudit cog."""
         self.bot = bot
         self.config_db = config_db
@@ -79,20 +118,17 @@ class SecurityAudit(
         await self.bot.wait_until_ready()
 
     @staticmethod
-    def _smart_chunk(text: str, limit: int = 1024) -> list[str]:
-        """Split text into chunks of at most `limit` chars, trying to break on newlines/spaces."""
-        if len(text) <= limit:
-            return [text]
-
-        # Use textwrap to handle intelligent line breaking
-        return textwrap.wrap(
-            text,
-            width=limit,
-            break_long_words=True,
-            break_on_hyphens=False,
-            replace_whitespace=False,
-            expand_tabs=False,
-        )
+    def _render_compact_category(category: str, issue_list: list[AuditIssue]) -> tuple[str, str]:
+        """Combine all compact issues for a category into one bullet-list field value."""
+        lines = []
+        for issue in issue_list:
+            line = issue.details or ""
+            if issue.entities:
+                mentions = ", ".join(e.mention for e in issue.entities)
+                line += (" - " if line else "") + mentions
+            if line:
+                lines.append(f"• {line}")
+        return category, "\n".join(lines) or "No details."
 
     async def _send_audit_embed(
         self,
@@ -100,18 +136,8 @@ class SecurityAudit(
         title: str,
         results: AuditResult | AuditReport,
         color: discord.Colour,
-        conclusion: str = "Audit complete.",
     ) -> None:
-        """Send a standardized, paginated embed for audit results.
-
-        Args:
-            ctx: The command context.
-            title: Title for the embed.
-            results: Either a list of AuditIssue or an AuditReport instance.
-            color: Color for the embed.
-            conclusion: Concluding message for the audit (default: "Audit complete.").
-
-        """
+        """Send audit results as category-atomic embeds with entity pagination for large lists."""
         if not results:
             embed = discord.Embed(
                 title=title,
@@ -121,7 +147,7 @@ class SecurityAudit(
             await ctx.send(embed=embed, ephemeral=True)
             return
 
-        # Canonicalize input to AuditReport for uniform handling
+        # Canonicalize to AuditReport
         report = AuditReport()
         if isinstance(results, list):
             for issue in results:
@@ -129,49 +155,41 @@ class SecurityAudit(
         else:
             report = results
 
-        summary = report.get_summary()
+        compact_embed = discord.Embed(title=title, color=color)
+        compact_field_count = 0
+        compact_char_count = len(title)
 
-        # Create the first embed
-        embed = discord.Embed(title=title, color=color)
+        for category, issue_list in report.issues.items():
+            large = [i for i in issue_list if len(i.entities) > ENTITY_THRESHOLD]
+            compact = [i for i in issue_list if len(i.entities) <= ENTITY_THRESHOLD]
 
-        # We will split by fields. Discord limit is 25 fields per embed.
-        # AND 6000 characters total per embed.
+            # Batch all compact issues for this category into one field
+            if compact:
+                name, value = self._render_compact_category(category, compact)
+                new_chars = len(name) + len(value)
+                if compact_field_count > 0 and (compact_field_count >= 25 or compact_char_count + new_chars > 5800):
+                    await ctx.send(embed=compact_embed, ephemeral=True)
+                    compact_embed = discord.Embed(title=f"{title} (Continued)", color=color)
+                    compact_field_count = 0
+                    compact_char_count = len(title) + 12
+                field_value = value[:1021] + "…" if len(value) > 1024 else value
+                compact_embed.add_field(name=name, value=field_value, inline=False)
+                compact_field_count += 1
+                compact_char_count += new_chars
 
-        field_count = 0
-        current_embed_char_count = len(title)
+            # Each large-entity issue gets its own paginated message
+            for issue in large:
+                if compact_field_count > 0:
+                    await ctx.send(embed=compact_embed, ephemeral=True)
+                    compact_embed = discord.Embed(title=f"{title} (Continued)", color=color)
+                    compact_field_count = 0
+                    compact_char_count = len(title) + 12
 
-        first_embed = True
+                view = IssueEntityView(issue, color)
+                await ctx.send(embed=await view.get_embed(), view=view, ephemeral=True)
 
-        for category, text in summary.items():
-            # If text is too long for a single field value (1024), we might need to split it
-            # But the requirement was "Fix Pagination with field chunks"
-            # Let's handle simple 1024 chunks for safety
-
-            # Use smart chunking to avoid breaking mentions or markdown
-            chunks = self._smart_chunk(text, 1024)
-
-            for i, chunk in enumerate(chunks):
-                name = category if i == 0 else f"{category} (Cont.)"
-
-                # Check limits
-                if field_count >= 25 or (current_embed_char_count + len(name) + len(chunk)) > 5800:
-                    # Send current embed and start new one
-                    await ctx.send(embed=embed, ephemeral=True)
-                    first_embed = False
-                    embed = discord.Embed(title=f"{title} (Continued)", color=color)
-                    field_count = 0
-                    current_embed_char_count = len(title) + 12  # approximation
-
-                embed.add_field(name=name, value=chunk, inline=False)
-                field_count += 1
-                current_embed_char_count += len(name) + len(chunk)
-
-        if field_count > 0:
-            await ctx.send(embed=embed, ephemeral=True)
-
-        # Send a final conclusion message if it was a multi-page report or just to be polite
-        if not first_embed:
-            await ctx.send(conclusion, ephemeral=True)
+        if compact_field_count > 0:
+            await ctx.send(embed=compact_embed, ephemeral=True)
 
     @app_commands.command(
         name="validate_config",
@@ -322,26 +340,13 @@ class SecurityAudit(
 
         with_perms, no_perms = audit_utils.get_role_lists(ctx.guild)
 
-        embed = discord.Embed(
-            title=f"Roles in {ctx.guild.name}",
-            color=discord.Colour.blue(),
-        )
-        embed.add_field(
-            name="Roles with Permissions",
-            value="\n".join(with_perms) or "None",
-            inline=False,
-        )
-        await ctx.send(embed=embed, ephemeral=True)
+        def _join_truncated(mentions: list[str]) -> str:
+            joined = ", ".join(mentions)
+            return joined[:1021] + "…" if len(joined) > 1024 else joined or "None"
 
-        embed = discord.Embed(
-            title=f"Roles in {ctx.guild.name}",
-            color=discord.Colour.blue(),
-        )
-        embed.add_field(
-            name="Roles with No Permissions",
-            value="\n".join(no_perms) or "None",
-            inline=False,
-        )
+        embed = discord.Embed(title=f"Roles in {ctx.guild.name}", color=discord.Colour.blue())
+        embed.add_field(name="Roles with Permissions", value=_join_truncated(with_perms), inline=False)
+        embed.add_field(name="Roles with No Permissions", value=_join_truncated(no_perms), inline=False)
         await ctx.send(embed=embed, ephemeral=True)
 
     def _add_issues_to_report(
@@ -422,7 +427,7 @@ class SecurityAudit(
         )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Load the SecurityAudit cog."""
     await bot.add_cog(SecurityAudit(bot, config_db=bot.config_db))
     log.info("Cog 'SecurityAudit' loaded.")

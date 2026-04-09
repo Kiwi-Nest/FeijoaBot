@@ -10,8 +10,8 @@ from modules.dtypes import GuildId, InviterId, UserId
 from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.InvitesDB import InvitesDB
-    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class InvitesCog(GuildOnlyHybridCog):
     # 1. Define the parent group for all invite commands
     invites = app_commands.Group(name="invites", description="Commands for invite tracking.")
 
-    def __init__(self, bot: KiwiBot, invites_db: InvitesDB) -> None:  # Removed guild_id, alert_channel_id from init
+    def __init__(self, bot: BotCore, invites_db: InvitesDB) -> None:  # Removed guild_id, alert_channel_id from init
         self.bot = bot
         self.invites_db = invites_db
         self.invites: dict[GuildId, dict[str, int]] = {}  # Cache still needed for invite diffing
@@ -267,7 +267,7 @@ class InvitesCog(GuildOnlyHybridCog):
         await interaction.followup.send(f"Sync complete. {rows_affected} records were created or updated.")
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Entry point for loading the cog."""
     # InvitesCog is now stateless and will fetch config per guild.
     await bot.add_cog(InvitesCog(bot=bot, invites_db=bot.invites_db))

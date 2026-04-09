@@ -9,9 +9,9 @@ from modules.security_utils import check_bot_hierarchy, check_verifiable_role
 from modules.utils import format_ordinal
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
     from modules.InvitesDB import InvitesDB
-    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 class JoinLeaveLogCog(commands.Cog):
     """A cog for logging member join and leave events to a specified channel."""
 
-    def __init__(self, bot: KiwiBot, config_db: ConfigDB, invites_db: InvitesDB) -> None:
+    def __init__(self, bot: BotCore, config_db: ConfigDB, invites_db: InvitesDB) -> None:
         self.bot = bot
         self.config_db = config_db
         self.invites_db = invites_db
@@ -317,6 +317,6 @@ class JoinLeaveLogCog(commands.Cog):
         await self._log_event(member, title, color, description)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the cog to the bot."""
     await bot.add_cog(JoinLeaveLogCog(bot=bot, config_db=bot.config_db, invites_db=bot.invites_db))

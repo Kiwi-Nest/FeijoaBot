@@ -7,7 +7,7 @@ from discord.ext import commands
 from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
 
 log = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 class Roles(GuildOnlyHybridCog):
     """A cog for listing and managing roles."""
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: BotCore) -> None:
         self.bot = bot
 
     @commands.hybrid_command(
@@ -80,6 +80,6 @@ class Roles(GuildOnlyHybridCog):
         log.info("'listroles' command executed by %s.\n", ctx.author.display_name)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Load the Roles cog."""
     await bot.add_cog(Roles(bot))

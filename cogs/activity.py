@@ -1,14 +1,13 @@
 import logging
 from typing import TYPE_CHECKING
 
+import discord
 from discord.ext import commands, tasks
 
 from modules.dtypes import GuildId, UserGuildPair, UserId
 
 if TYPE_CHECKING:
-    import discord
-
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
     from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
@@ -17,7 +16,7 @@ log = logging.getLogger(__name__)
 class Activity(commands.Cog):
     """Handle user activity tracking and database updates."""
 
-    def __init__(self, bot: KiwiBot, *, user_db: UserDB) -> None:
+    def __init__(self, bot: BotCore, *, user_db: UserDB) -> None:
         self.bot = bot
         self.user_db = user_db
         self.activity_cache: set[UserGuildPair] = set()
@@ -34,6 +33,8 @@ class Activity(commands.Cog):
 
         self.activity_cache.add((UserId(user.id), guild_id))
         log.debug("Cached activity for user %d in guild %d", user.id, guild_id)
+        if isinstance(user, discord.Member):
+            self.bot.dispatch("user_activity", user)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
@@ -201,6 +202,6 @@ class Activity(commands.Cog):
         await self.bot.wait_until_ready()
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the cog to the bot."""
     await bot.add_cog(Activity(bot, user_db=bot.user_db))

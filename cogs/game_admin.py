@@ -17,7 +17,7 @@ from modules.server_admin import (
 )
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
 
 log = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class GameAdmin(
 ):
     """A cog for managing game servers via Discord, using GroupCog."""
 
-    def __init__(self, bot: KiwiBot, server_manager: ServerManager) -> None:
+    def __init__(self, bot: BotCore, server_manager: ServerManager) -> None:
         self.bot = bot
         # The manager now comes directly from the bot instance
         self.manager: ServerManager = server_manager
@@ -368,7 +368,7 @@ class GameAdmin(
             await interaction.followup.send("❌ An unexpected error occurred.", ephemeral=True)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the GameAdmin cog to the bot."""
     if not bot.config.mc_guild_id or not bot.config.servers_path:
         log.error(

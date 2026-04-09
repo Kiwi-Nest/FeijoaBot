@@ -11,9 +11,9 @@ from modules.dtypes import GuildId, PositiveInt, UserId
 from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.config import BotConfig
     from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ class Harvest(GuildOnlyHybridCog):
         "Bone Marrow",
     )
 
-    def __init__(self, bot: KiwiBot, *, config: BotConfig, user_db: UserDB, ledger_db: CurrencyLedgerDB) -> None:
+    def __init__(self, bot: BotCore, *, config: BotConfig, user_db: UserDB, ledger_db: CurrencyLedgerDB) -> None:
         self.bot = bot
         self.config = config
         self.user_db = user_db
@@ -137,7 +137,7 @@ class Harvest(GuildOnlyHybridCog):
         await self._process_sale(ctx, organ, self.ORGANS, "harvest")
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Set up the cog."""
     if not bot.config.swl_guild_id:
         log.error(

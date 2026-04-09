@@ -21,8 +21,8 @@ from modules.guild_cog import GuildOnlyHybridCog
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from modules.BotCore import BotCore
     from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
     from modules.TaskDB import TaskDB
     from modules.UserDB import UserDB
 
@@ -40,7 +40,7 @@ class DailyView(discord.ui.View):
 
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         user_db: UserDB,
         owner_id: UserId,
         daily_mon: int,
@@ -163,7 +163,7 @@ class DailyView(discord.ui.View):
 class Daily(GuildOnlyHybridCog):
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         *,
         user_db: UserDB,
         task_db: TaskDB,
@@ -316,7 +316,7 @@ class Daily(GuildOnlyHybridCog):
         await ctx.send(response_content, view=view, ephemeral=True)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the Daily cog to the bot."""
     await bot.add_cog(
         Daily(

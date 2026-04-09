@@ -9,8 +9,8 @@ from modules.dtypes import GuildId, GuildInteraction, UserId
 from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_role_safety, ensure_verifiable_role
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +31,7 @@ RoleSetting = Literal[
     "verified_role_id",
     "automute_role_id",
     "xp_opt_out_role_id",
+    "inactive_role_id",
 ]
 
 
@@ -39,7 +40,7 @@ class AutodiscoverView(discord.ui.View):
 
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         author_id: UserId,
         suggestions: dict[str, int],
         *,
@@ -120,6 +121,7 @@ def get_suggestions(guild: discord.Guild) -> dict[str, int | None]:  # noqa: PLR
         "verified_role_id": None,
         "automute_role_id": None,
         "xp_opt_out_role_id": None,
+        "inactive_role_id": None,
     }
 
     # Scan Text Channels for logs and fallbacks
@@ -159,6 +161,8 @@ def get_suggestions(guild: discord.Guild) -> dict[str, int | None]:  # noqa: PLR
             suggestions["automute_role_id"] = role.id
         if "xp" in name and "opt" in name and "out" in name:
             suggestions["xp_opt_out_role_id"] = role.id
+        if "inactive" in name:
+            suggestions["inactive_role_id"] = role.id
 
     return suggestions
 
@@ -172,7 +176,7 @@ class Config(
 ):
     """A cog for guild-specific configuration with slash commands."""
 
-    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
+    def __init__(self, bot: BotCore, *, config_db: ConfigDB) -> None:
         self.bot = bot
         self.config_db = config_db
         super().__init__()
@@ -253,9 +257,11 @@ class Config(
             "Verified Role": config.verified_role_id,
             "Automute Role": config.automute_role_id,
             "XP Opt-Out Role": config.xp_opt_out_role_id,
+            "Inactive Role": config.inactive_role_id,
         }
         other = {
             "Inactive Member Prune Days": f"{config.inactivity_days} days",
+            "Inactive Role Threshold": f"{config.inactive_role_threshold_days} days",
             "Custom Role Prefix": f"`{config.custom_role_prefix}`",
             "Custom Role Prune Days": f"{config.custom_role_prune_days} days",
         }
@@ -367,6 +373,7 @@ class Config(
             app_commands.Choice(name="Verified Role", value="verified_role_id"),
             app_commands.Choice(name="Automute Role", value="automute_role_id"),
             app_commands.Choice(name="XP Opt-Out Role", value="xp_opt_out_role_id"),
+            app_commands.Choice(name="Inactive Role", value="inactive_role_id"),
         ],
     )
     async def set_role(
@@ -386,6 +393,7 @@ class Config(
                 "backup_bumper_role_id",
                 "tag_role_id",
                 "xp_opt_out_role_id",
+                "inactive_role_id",
             ]
             require_no_perms = feature.value in cosmetic_features
 
@@ -569,6 +577,30 @@ class Config(
     )
 
     @prune.command(
+        name="set-inactive-threshold",
+        description="Set the number of days of inactivity before assigning the inactive role.",
+    )
+    @app_commands.describe(days="Number of days (e.g., 50). Must be greater than 0.")
+    async def set_inactive_threshold(
+        self,
+        interaction: GuildInteraction,
+        days: app_commands.Range[int, 1],
+    ) -> None:
+        """Set the inactivity threshold for the inactive role."""
+        if not interaction.guild_id:
+            return
+
+        await self.config_db.set_setting(
+            GuildId(interaction.guild_id),
+            "inactive_role_threshold_days",
+            days,
+        )
+        await interaction.response.send_message(
+            f"✅ Members will receive the inactive role after **{days}** days of inactivity.",
+            ephemeral=True,
+        )
+
+    @prune.command(
         name="set-days",
         description="Set the number of days of inactivity before pruning roles.",
     )
@@ -658,6 +690,6 @@ class Config(
         )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the Config cog to the bot."""
     await bot.add_cog(Config(bot, config_db=bot.config_db))

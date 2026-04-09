@@ -8,8 +8,8 @@ from modules.dtypes import GuildId
 from modules.security_utils import check_bot_hierarchy, check_verifiable_role
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import GuildConfig
-    from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
 # Use Python's logging module for better diagnostics in a reusable component
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 class PrunerCog(commands.Cog):
     def __init__(
         self,
-        bot: KiwiBot,  # Removed guild_id, role_ids_to_prune, inactivity_days from init
+        bot: BotCore,  # Removed guild_id, role_ids_to_prune, inactivity_days from init
         user_db: UserDB,  # UserDB is still needed
     ) -> None:
         self.bot = bot
@@ -184,7 +184,7 @@ class PrunerCog(commands.Cog):
 
 
 # The setup function that discord.py calls when loading the extension
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     # The cog needs the UserDB instance from the bot
     user_db = getattr(bot, "user_db", None)
     if not user_db:

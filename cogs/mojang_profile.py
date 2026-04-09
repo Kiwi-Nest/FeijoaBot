@@ -11,7 +11,7 @@ from discord.ext import commands
 from modules.exceptions import UserError
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
 
 log = logging.getLogger(__name__)
 
@@ -41,9 +41,9 @@ Player = app_commands.Transform[UUID | str, PlayerTransformer]
 
 
 class MojangProfile(commands.Cog):
-    bot: KiwiBot
+    bot: BotCore
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: BotCore) -> None:
         self.bot = bot
 
     @commands.hybrid_command(
@@ -97,5 +97,5 @@ class MojangProfile(commands.Cog):
         log.info("Mojang profile lookup by %s for %s", ctx.author.display_name, profile.name)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     await bot.add_cog(MojangProfile(bot=bot))

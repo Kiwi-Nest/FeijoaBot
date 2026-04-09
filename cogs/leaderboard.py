@@ -8,7 +8,7 @@ from modules.dtypes import GuildId, NonNegativeInt, UserId
 from modules.enums import StatName
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
     from modules.UserDB import UserDB
 
 
@@ -17,7 +17,7 @@ class LeaderboardView(discord.ui.View):
 
     def __init__(
         self,
-        bot: KiwiBot,
+        bot: BotCore,
         data: list[tuple[int, UserId, NonNegativeInt]],
         stat_choice: app_commands.Choice[str],
         per_page: int = 10,
@@ -73,7 +73,7 @@ class LeaderboardView(discord.ui.View):
 
 
 class Leaderboard(commands.Cog):
-    def __init__(self, bot: KiwiBot, user_db: UserDB) -> None:
+    def __init__(self, bot: BotCore, user_db: UserDB) -> None:
         self.bot = bot
         self.user_db = user_db
 
@@ -110,5 +110,5 @@ class Leaderboard(commands.Cog):
         await interaction.followup.send(embed=embed, view=view)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     await bot.add_cog(Leaderboard(bot=bot, user_db=bot.user_db))

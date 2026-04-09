@@ -9,8 +9,8 @@ from modules.dtypes import GuildId
 from modules.security_utils import check_bot_hierarchy, check_verifiable_role
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB, GuildConfig
-    from modules.KiwiBot import KiwiBot
 
 # Set up logging for this cog
 log = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 class RolePrunerCog(commands.Cog):
     """A cog that automatically prunes old roles with a specific prefix."""
 
-    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
+    def __init__(self, bot: BotCore, *, config_db: ConfigDB) -> None:
         self.bot = bot
         self.config_db = config_db
         # Start the pruning loop as soon as the cog is loaded
@@ -119,7 +119,7 @@ class RolePrunerCog(commands.Cog):
         log.info("Finished daily role pruning check.")
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the cog to the bot."""
     # RolePrunerCog is now stateless and will fetch config per guild.
     await bot.add_cog(RolePrunerCog(bot, config_db=bot.config_db))

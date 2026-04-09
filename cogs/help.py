@@ -9,7 +9,7 @@ from discord.ext import commands
 from modules.help_command import FeijoaCommand
 
 if TYPE_CHECKING:
-    from modules.KiwiBot import KiwiBot
+    from modules.BotCore import BotCore
 
 log = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 class Help(commands.Cog):
     command_list: dict[str, FeijoaCommand]
 
-    def __init__(self, bot: KiwiBot) -> None:
+    def __init__(self, bot: BotCore) -> None:
         self.bot = bot
         self.command_list = {}
 
@@ -161,6 +161,6 @@ class Help(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the cog to the bot."""
     await bot.add_cog(Help(bot=bot))

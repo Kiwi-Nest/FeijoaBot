@@ -11,8 +11,8 @@ from modules.guild_cog import GuildOnlyHybridCog
 from modules.result import Err, Ok
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.CurrencyLedgerDB import CurrencyLedgerDB
-    from modules.KiwiBot import KiwiBot
     from modules.UserDB import UserDB
 
 log = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ SECOND_COOLDOWN: Final[int] = 1
 
 
 class Donate(GuildOnlyHybridCog):
-    def __init__(self, bot: KiwiBot, user_db: UserDB, ledger_db: CurrencyLedgerDB) -> None:
+    def __init__(self, bot: BotCore, user_db: UserDB, ledger_db: CurrencyLedgerDB) -> None:
         self.bot = bot
         self.user_db = user_db
         self.ledger_db = ledger_db
@@ -65,5 +65,5 @@ class Donate(GuildOnlyHybridCog):
         log.info("Donate command executed by %s.\n", ctx.author.display_name)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     await bot.add_cog(Donate(bot=bot, user_db=bot.user_db, ledger_db=bot.ledger_db))

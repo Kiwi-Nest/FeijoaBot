@@ -16,8 +16,8 @@ from modules.security_utils import (
 )
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class Moderate(
     Includes built-in rate limiting and centralized hierarchy checks.
     """
 
-    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
+    def __init__(self, bot: BotCore, *, config_db: ConfigDB) -> None:
         self.bot = bot
         self.config_db = config_db
         super().__init__()
@@ -552,6 +552,6 @@ class Moderate(
             log.exception("Failed to unmute %s", member)
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the cog to the bot."""
     await bot.add_cog(Moderate(bot, config_db=bot.config_db))

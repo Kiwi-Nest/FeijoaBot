@@ -1,6 +1,6 @@
-# KiwiBot
+# Feijoa
 
-KiwiBot is a comprehensive Discord bot with an economy, games, moderation tools, and automated server management.
+Feijoa is a comprehensive Discord bot with an economy, games, moderation tools, and automated server management.
 
 ---
 

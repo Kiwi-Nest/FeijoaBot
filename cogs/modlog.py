@@ -10,8 +10,8 @@ from discord.ext import commands
 from modules.dtypes import GuildId
 
 if TYPE_CHECKING:
+    from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
-    from modules.KiwiBot import KiwiBot
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 class ModLogCog(commands.Cog):
     """A cog for logging moderation actions to a specified channel."""
 
-    def __init__(self, bot: KiwiBot, *, config_db: ConfigDB) -> None:
+    def __init__(self, bot: BotCore, *, config_db: ConfigDB) -> None:
         self.bot = bot
         self.config_db = config_db
         # Cooldown tracking for security alerts: {guild_id:warning_type: timestamp}
@@ -379,7 +379,7 @@ class ModLogCog(commands.Cog):
             )
 
 
-async def setup(bot: KiwiBot) -> None:
+async def setup(bot: BotCore) -> None:
     """Add the cog to the bot."""
     # ModLogCog is stateless and will fetch config per guild.
     await bot.add_cog(ModLogCog(bot=bot, config_db=bot.config_db))

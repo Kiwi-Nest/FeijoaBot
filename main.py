@@ -3,8 +3,8 @@ import logging
 import discord
 from dotenv import load_dotenv
 
+from modules.BotCore import BotCore
 from modules.config import BotConfig
-from modules.KiwiBot import KiwiBot
 
 # Loads environment variables
 load_dotenv()
@@ -32,7 +32,7 @@ try:
     config = BotConfig.from_environment()
 
     # Pass the config object into the bot's constructor
-    bot: KiwiBot = KiwiBot(config=config)
+    bot: BotCore = BotCore(config=config)
 
     bot.run(config.token)
 
