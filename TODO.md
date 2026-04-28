@@ -1,6 +1,6 @@
 # High Priority
 
-Role pings for event coordination
+Invite skimming should look at the API if possible to see if an infinite invite was last used months ago
 
 Ticket command
 
@@ -10,8 +10,8 @@ Profile command
 
 - Could replace /balance by adding other statistics
 
+Fix invite sync not properly persisting data. Bulk import does not recognize old data.
+
 # Low Priority
 
-Persist blackjack stats in sqlite
-
-- Can change the actual stats stored to better fit the schema
+- Message purge

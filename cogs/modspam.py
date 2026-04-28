@@ -32,13 +32,9 @@ class ModSpamCog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        if not is_guild_message(message):
-            return
-        if message.author.bot:
+        if not is_guild_message(message) or message.author.bot or message.author.is_timed_out():
             return
         member = message.author
-        if member.is_timed_out():
-            return
 
         # Check even empty messages because some scams only use images and we can't compare those
         content = sanitize_chat(message.content).casefold()

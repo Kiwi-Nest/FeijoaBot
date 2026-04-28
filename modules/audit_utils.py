@@ -207,7 +207,10 @@ async def check_invites(guild: discord.Guild) -> AuditResult:
                     AuditIssue(
                         category="Infinite Invite",
                         entities=[],  # Invite is not a standard entity we listed, putting details in text
-                        details=f"Code `{invite.code}` by {inviter} • Created: {created} • Used {uses} times (never expires, no use limit).",
+                        details=(
+                            f"Code `{invite.code}` by {inviter} • Created: {created} • Used "
+                            f"{uses} times (never expires, no use limit)."
+                        ),
                     ),
                 )
     except discord.Forbidden:
@@ -366,7 +369,9 @@ async def check_automod(guild: discord.Guild) -> AuditResult:
             AuditIssue(
                 category="Weak Security",
                 entities=[],
-                details="No AutoMod rules configured. Consider enabling keyword filters, spam protection, and mention spam rules.",
+                details=(
+                    "No AutoMod rules configured. Consider enabling keyword filters, spam protection, and mention spam rules."
+                ),
             ),
         ]
 

@@ -36,7 +36,9 @@ class InactiveCog(commands.Cog):
                 "security_alert",
                 guild_id=guild.id,
                 risk_level="MEDIUM",
-                details=f"**Inactive Role Skipped**\nI skipped managing the inactive role {role.mention}. Reason: {safety.reason}",
+                details=(
+                    f"**Inactive Role Skipped**\nI skipped managing the inactive role {role.mention}. Reason: {safety.reason}"
+                ),
                 warning_type="inactive_security",
             )
             return False

@@ -11,6 +11,11 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _read_starters() -> list[str]:
+    with pathlib.Path("data/conversation_starters.txt").open() as f:
+        return [line.strip() for line in f if line.strip()]
+
+
 class Starter(commands.Cog):
     def __init__(self, bot: BotCore) -> None:
         self.bot = bot
@@ -18,9 +23,7 @@ class Starter(commands.Cog):
     @commands.hybrid_command(name="starter", description="Get a random conversation starter")
     @commands.cooldown(1, 1, commands.BucketType.user)
     async def starter(self, ctx: commands.Context) -> None:
-        with pathlib.Path("data/conversation_starters.txt").open() as f:
-            starters = [line.strip() for line in f if line.strip()]
-
+        starters = _read_starters()
         await ctx.send(random.choice(starters))
         log.info("Starter command executed by %s.", ctx.author.display_name)
 

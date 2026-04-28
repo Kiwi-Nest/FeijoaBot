@@ -1,5 +1,5 @@
 import logging
-from typing import TYPE_CHECKING, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 import discord
 from discord import app_commands
@@ -15,6 +15,8 @@ from modules.security_utils import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
+
     from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
 
@@ -129,7 +131,7 @@ class RoleListView(discord.ui.View):
             self.add_item(prev_btn)
             self.add_item(next_btn)
 
-    def _make_page_callback(self, delta: int):
+    def _make_page_callback(self, delta: int) -> Callable[[discord.Interaction], Coroutine[Any, Any, None]]:
         async def callback(interaction: discord.Interaction) -> None:
             self.page += delta
             self._rebuild()

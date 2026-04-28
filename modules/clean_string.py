@@ -1,4 +1,5 @@
-"""Chat Sanitizer - Python 3.13+
+"""Chat Sanitizer.
+
 English + full emoji, nuisance filter only.
 Uses `regex` when available, falls back to `unicodedata`.
 """
