@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
 from datetime import timedelta
@@ -11,6 +12,7 @@ from discord.ext import commands
 if TYPE_CHECKING:
     from modules.BotCore import BotCore
 
+from modules.clean_string import sanitize_chat
 from modules.dtypes import ChannelId, GuildId, UserId, is_guild_message
 
 log = logging.getLogger(__name__)
@@ -39,7 +41,7 @@ class ModSpamCog(commands.Cog):
             return
 
         # Check even empty messages because some scams only use images and we can't compare those
-        content = message.content.strip().casefold()
+        content = sanitize_chat(message.content).casefold()
         guild = message.guild
         key = (UserId(member.id), GuildId(guild.id))
         now = time.monotonic()
@@ -57,6 +59,9 @@ class ModSpamCog(commands.Cog):
         distinct = {ch for c, mt, ch, _ in self._log[key] if c == content and mt == message.type}
         if len(distinct) < THRESHOLD:
             return
+
+        with contextlib.suppress(discord.Forbidden):
+            await message.delete()
 
         # --- Apply timeout ---
         if not guild.me.guild_permissions.moderate_members:

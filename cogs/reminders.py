@@ -16,6 +16,7 @@ from dateparser.search import search_dates
 from discord import app_commands
 from discord.ext import commands
 
+from modules.clean_string import sanitize_chat
 from modules.dtypes import ChannelId, GuildId, MessageId, UserId
 
 if TYPE_CHECKING:
@@ -297,11 +298,11 @@ class Reminders(commands.Cog):
             return
 
         # Check for "remind" keyword (case-insensitive)
-        content = message.content.lower()
+        content = sanitize_chat(message.content).lower()
         if "remind" not in content:
             return
 
-        clean_content = message.content
+        clean_content = sanitize_chat(message.content)
         clean_content = re.sub(r"<@!?\d+>", "", clean_content)
         clean_content = re.sub(r"^\s*remind\s*(me\s*)?(to\s*)?", "", clean_content, flags=re.IGNORECASE).strip()
 

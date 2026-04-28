@@ -1,16 +1,27 @@
 import logging
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from modules.dtypes import GuildId, GuildInteraction, UserId
-from modules.security_utils import SecurityCheckError, ensure_bot_hierarchy, ensure_role_safety, ensure_verifiable_role
+from modules.dtypes import GuildId, GuildInteraction, RoleId, UserId
+from modules.security_utils import (
+    SecurityCheckError,
+    check_role_safety,
+    ensure_bot_hierarchy,
+    ensure_role_safety,
+    ensure_verifiable_role,
+)
 
 if TYPE_CHECKING:
     from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
+
+_ROLE_LIST_PER_PAGE: Final[int] = 20  # rows 0 to 3; row 4 reserved for ◀/▶ nav
+_AUTODISCOVER_EXCLUDED: Final[frozenset[str]] = frozenset(
+    {"warn", "boy", "girl", "non-binary", "muted", "bot", "red", "orange", "yellow", "green", "blue", "purple", "black"},
+)
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +44,104 @@ RoleSetting = Literal[
     "xp_opt_out_role_id",
     "inactive_role_id",
 ]
+
+
+class RoleListButton(discord.ui.Button):
+    def __init__(self, role: discord.Role, style: discord.ButtonStyle) -> None:
+        super().__init__(label=role.name, style=style)
+        self.role = role
+
+    async def callback(self, interaction: discord.Interaction) -> None:
+        view: RoleListView = self.view  # type: ignore[assignment]
+        guild_id = GuildId(interaction.guild_id)
+        config = await view.config_db.get_guild_config(guild_id)
+        current: list[RoleId] = list(getattr(config, view.setting) or [])
+        role_id = RoleId(self.role.id)
+
+        if view.action == "add" and role_id not in current:
+            current.append(role_id)
+            self.style = discord.ButtonStyle.success
+        elif view.action == "remove" and role_id in current:
+            current.remove(role_id)
+            self.style = discord.ButtonStyle.secondary
+
+        self.disabled = True
+        await view.config_db.set_setting(guild_id, view.setting, current)
+        await interaction.response.edit_message(view=view)
+
+
+class RoleListView(discord.ui.View):
+    """Paginated view of role buttons for add/remove list management."""
+
+    def __init__(
+        self,
+        all_roles: list[discord.Role],
+        config_db: ConfigDB,
+        guild_id: GuildId,
+        setting: str,
+        author_id: UserId,
+        label: str,
+        *,
+        action: Literal["add", "remove"],
+    ) -> None:
+        super().__init__(timeout=180)
+        self.all_roles = all_roles
+        self.page = 0
+        self.label = label
+        self.config_db = config_db
+        self.guild_id = guild_id
+        self.setting = setting
+        self.action = action
+        self.author_id = author_id
+        self._rebuild()
+
+    @property
+    def total_pages(self) -> int:
+        return max(1, (len(self.all_roles) + _ROLE_LIST_PER_PAGE - 1) // _ROLE_LIST_PER_PAGE)
+
+    @property
+    def page_header(self) -> str:
+        verb = "add to" if self.action == "add" else "remove from"
+        page_info = f" - Page {self.page + 1}/{self.total_pages}" if self.total_pages > 1 else ""
+        return f"Click a role to {verb} the {self.label} list{page_info}:"
+
+    def _rebuild(self) -> None:
+        self.clear_items()
+        start = self.page * _ROLE_LIST_PER_PAGE
+        btn_style = discord.ButtonStyle.secondary if self.action == "add" else discord.ButtonStyle.danger
+        for role in self.all_roles[start : start + _ROLE_LIST_PER_PAGE]:
+            self.add_item(RoleListButton(role, btn_style))
+        if self.total_pages > 1:
+            prev_btn = discord.ui.Button(
+                label="◀",
+                style=discord.ButtonStyle.secondary,
+                disabled=self.page == 0,
+                row=4,
+            )
+            next_btn = discord.ui.Button(
+                label="▶",
+                style=discord.ButtonStyle.secondary,
+                disabled=self.page >= self.total_pages - 1,
+                row=4,
+            )
+            prev_btn.callback = self._make_page_callback(-1)
+            next_btn.callback = self._make_page_callback(1)
+            self.add_item(prev_btn)
+            self.add_item(next_btn)
+
+    def _make_page_callback(self, delta: int):
+        async def callback(interaction: discord.Interaction) -> None:
+            self.page += delta
+            self._rebuild()
+            await interaction.response.edit_message(content=self.page_header, view=self)
+
+        return callback
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message("This isn't your menu.", ephemeral=True)
+            return False
+        return True
 
 
 class AutodiscoverView(discord.ui.View):
@@ -147,6 +256,8 @@ def get_suggestions(guild: discord.Guild) -> dict[str, int | None]:  # noqa: PLR
     # Scan Roles
     for role in guild.roles:
         name = role.name.lower()
+        if any(excl in name for excl in _AUTODISCOVER_EXCLUDED):
+            continue
         if "mute" in name:
             suggestions["muted_role_id"] = role.id
         if "bumper" in name and "backup" not in name:
@@ -180,6 +291,71 @@ class Config(
         self.bot = bot
         self.config_db = config_db
         super().__init__()
+
+    async def _manage_role_list(
+        self,
+        interaction: GuildInteraction,
+        role: discord.Role | None,
+        setting: str,
+        label: str,
+        *,
+        action: Literal["add", "remove"],
+        add_msg: str | None = None,
+        remove_msg: str | None = None,
+    ) -> None:
+        """Add or remove a role from a RoleIdList config setting.
+
+        When role is None, shows a paginated button view to pick interactively.
+        """
+        guild_id = GuildId(interaction.guild_id)
+        config = await self.config_db.get_guild_config(guild_id)
+
+        if role is None:
+            if action == "add":
+                in_list = set(getattr(config, setting) or [])
+                roles = [
+                    r
+                    for r in interaction.guild.roles
+                    if not r.is_default()
+                    and RoleId(r.id) not in in_list
+                    and check_role_safety(r).ok
+                    and interaction.guild.me.top_role > r
+                ]
+                if not roles:
+                    await interaction.response.send_message(
+                        f"No eligible roles to add to the {label} list. "
+                        "Roles must have zero permissions and be below the bot in hierarchy.",
+                        ephemeral=True,
+                    )
+                    return
+            else:
+                roles = [r for r_id in (getattr(config, setting) or []) if (r := interaction.guild.get_role(r_id))]
+                if not roles:
+                    await interaction.response.send_message(f"No roles in the {label} list to remove.", ephemeral=True)
+                    return
+            view = RoleListView(roles, self.config_db, guild_id, setting, UserId(interaction.user.id), label, action=action)
+            await interaction.response.send_message(view.page_header, view=view, ephemeral=True)
+            return
+
+        # Role provided - immediate add/remove
+        current: list[RoleId] = list(getattr(config, setting) or [])
+        role_id = RoleId(role.id)
+
+        if action == "add":
+            if role_id in current:
+                await interaction.response.send_message(f"{role.mention} is already in the {label} list.", ephemeral=True)
+                return
+            current.append(role_id)
+            msg = add_msg or f"✅ {role.mention} added to the {label} list."
+        else:
+            if role_id not in current:
+                await interaction.response.send_message(f"{role.mention} is not in the {label} list.", ephemeral=True)
+                return
+            current.remove(role_id)
+            msg = remove_msg or f"✅ {role.mention} removed from the {label} list."
+
+        await self.config_db.set_setting(guild_id, setting, current)
+        await interaction.response.send_message(msg, ephemeral=True)
 
     async def on_app_command_error(
         self,
@@ -267,10 +443,18 @@ class Config(
         }
 
         prune_roles_value = " ".join(f"<@&{r_id}>" for r_id in config.roles_to_prune) if config.roles_to_prune else "*Not Set*"
+        event_roles_value = (
+            " ".join(f"<@&{r_id}>" for r_id in config.event_ping_roles) if config.event_ping_roles else "*Not Set*"
+        )
 
         embed.add_field(
             name="🛡️ Inactive Pruning",
             value=f"**Roles to Prune**: {prune_roles_value}",
+            inline=False,
+        )
+        embed.add_field(
+            name="🎮 Event Ping Roles",
+            value=event_roles_value,
             inline=False,
         )
         embed.add_field(
@@ -628,66 +812,78 @@ class Config(
         name="add-role",
         description="Add a (cosmetic) role to be pruned from inactive members.",
     )
-    @app_commands.describe(role="The (cosmetic) role to add to the prune list.")
+    @app_commands.describe(role="Role to add. Omit to pick from a list.")
     async def add_prune_role(
         self,
         interaction: GuildInteraction,
-        role: discord.Role,
+        role: discord.Role | None = None,
     ) -> None:
         """Add a role to the prune list."""
         if not interaction.guild_id:
             return
-
-        # Prunable roles must be cosmetic and manageable (raises SecurityCheckError on failure)
-        ensure_role_safety(role)
-        ensure_bot_hierarchy(interaction, role)
-
-        guild_id = GuildId(interaction.guild_id)
-        config = await self.config_db.get_guild_config(guild_id)
-        current_roles = config.roles_to_prune or []
-
-        if role.id in current_roles:
-            await interaction.response.send_message(
-                f"The role {role.mention} is already on the prune list.",
-                ephemeral=True,
-            )
-            return
-
-        current_roles.append(role.id)
-        await self.config_db.set_setting(guild_id, "roles_to_prune", current_roles)
-        await interaction.response.send_message(
-            f"✅ The role {role.mention} will now be pruned from inactive members.",
-            ephemeral=True,
+        if role is not None:
+            ensure_role_safety(role)
+            ensure_bot_hierarchy(interaction, role)
+        await self._manage_role_list(
+            interaction,
+            role,
+            "roles_to_prune",
+            "prune",
+            action="add",
+            add_msg=f"✅ The role {role.mention} will now be pruned from inactive members." if role else None,
         )
 
     @prune.command(name="remove-role", description="Remove a role from the prune list.")
-    @app_commands.describe(role="The role to remove from the prune list.")
+    @app_commands.describe(role="Role to remove. Omit to pick from a list.")
     async def remove_prune_role(
         self,
         interaction: GuildInteraction,
-        role: discord.Role,
+        role: discord.Role | None = None,
     ) -> None:
         """Remove a role from the prune list."""
         if not interaction.guild_id:
             return
-
-        guild_id = GuildId(interaction.guild_id)
-        config = await self.config_db.get_guild_config(guild_id)
-        current_roles = config.roles_to_prune or []
-
-        if role.id not in current_roles:
-            await interaction.response.send_message(
-                f"The role {role.mention} is not on the prune list.",
-                ephemeral=True,
-            )
-            return
-
-        current_roles.remove(role.id)
-        await self.config_db.set_setting(guild_id, "roles_to_prune", current_roles)
-        await interaction.response.send_message(
-            f"✅ The role {role.mention} will no longer be pruned from inactive members.",
-            ephemeral=True,
+        await self._manage_role_list(
+            interaction,
+            role,
+            "roles_to_prune",
+            "prune",
+            action="remove",
+            remove_msg=f"✅ The role {role.mention} will no longer be pruned from inactive members." if role else None,
         )
+
+    # Sub-group for Event Role Config
+    event_roles = app_commands.Group(
+        name="event-roles",
+        description="Configure roles users can ping for games and events.",
+    )
+
+    @event_roles.command(name="add", description="Allow users to ping a role for events or games.")
+    @app_commands.describe(role="Role to add. Omit to pick from a list.")
+    async def add_event_role(
+        self,
+        interaction: GuildInteraction,
+        role: discord.Role | None = None,
+    ) -> None:
+        """Add a role to the event ping list."""
+        if not interaction.guild_id:
+            return
+        if role is not None:
+            ensure_role_safety(role)
+            ensure_bot_hierarchy(interaction, role)
+        await self._manage_role_list(interaction, role, "event_ping_roles", "event ping", action="add")
+
+    @event_roles.command(name="remove", description="Remove a role from the pingable list.")
+    @app_commands.describe(role="Role to remove. Omit to pick from a list.")
+    async def remove_event_role(
+        self,
+        interaction: GuildInteraction,
+        role: discord.Role | None = None,
+    ) -> None:
+        """Remove a role from the event ping list."""
+        if not interaction.guild_id:
+            return
+        await self._manage_role_list(interaction, role, "event_ping_roles", "event ping", action="remove")
 
 
 async def setup(bot: BotCore) -> None:

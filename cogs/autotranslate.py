@@ -15,6 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from modules.clean_string import sanitize_chat
 from modules.dtypes import GuildId, UserId
 from modules.translation import TranslationClient
 
@@ -349,7 +350,7 @@ class AutoTranslate(commands.Cog):
 
         # Translate
         if translated := await self._unwanted_aware_translate(
-            message.content,
+            sanitize_chat(message.content),
             target=target_lang,
             bypass_ignore=True,
         ):  # User explicitly asked, so translate even short text
@@ -479,7 +480,11 @@ class AutoTranslate(commands.Cog):
         source_lang, target_lang = context
 
         # Perform Translation
-        if translation := await self._unwanted_aware_translate(message.content, source=source_lang, target=target_lang):
+        if translation := await self._unwanted_aware_translate(
+            sanitize_chat(message.content),
+            source=source_lang,
+            target=target_lang,
+        ):
             crumb = self.translator.get_breadcrumb_string(
                 source_lang,
                 target_lang,
@@ -555,7 +560,7 @@ class AutoTranslate(commands.Cog):
 
         # Translate
         if translation := await self._unwanted_aware_translate(
-            message.content,
+            sanitize_chat(message.content),
             source=source_lang,
             target=target_lang,
             bypass_ignore=True,

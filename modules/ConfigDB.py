@@ -44,6 +44,7 @@ class GuildConfig:
     xp_opt_out_role_id: RoleId | None = None
     inactive_role_id: RoleId | None = None
     roles_to_prune: RoleIdList | None = None
+    event_ping_roles: RoleIdList | None = None
     # Server Stats
     member_count_channel_id: ChannelId | None = None
     tag_role_id: RoleId | None = None
@@ -74,8 +75,15 @@ class GuildConfig:
                 field_values[prune_roles_index] = [RoleId(int(r_id)) for r_id in prune_roles_str.split(",") if r_id.isdigit()]
             else:
                 field_values[prune_roles_index] = None
+
+            event_roles_index = field_names.index("event_ping_roles")
+            event_roles_str: str | None = field_values[event_roles_index]
+            if event_roles_str:
+                field_values[event_roles_index] = [RoleId(int(r_id)) for r_id in event_roles_str.split(",") if r_id.isdigit()]
+            else:
+                field_values[event_roles_index] = None
         except ValueError, IndexError:
-            log.exception("Failed to parse roles_to_prune from database row.")
+            log.exception("Failed to parse role list fields from database row.")
         return cls(*field_values)
 
 
@@ -137,6 +145,7 @@ class ConfigDB:
 
                     -- Pruning Settings
                     roles_to_prune          TEXT, -- Comma-separated list of role IDs
+                    event_ping_roles        TEXT, -- Comma-separated list of pingable role IDs
                     inactivity_days         INTEGER NOT NULL DEFAULT 14 CHECK(inactivity_days > 0),
 
                     -- Other Settings with Defaults
@@ -156,6 +165,7 @@ class ConfigDB:
             for col_sql in [
                 "ALTER TABLE guild_configs ADD COLUMN inactive_role_id INTEGER",
                 "ALTER TABLE guild_configs ADD COLUMN inactive_role_threshold_days INTEGER NOT NULL DEFAULT 50",
+                "ALTER TABLE guild_configs ADD COLUMN event_ping_roles TEXT",
             ]:
                 try:
                     await conn.execute(col_sql)
@@ -200,7 +210,7 @@ class ConfigDB:
             raise ValueError(msg)  # Raise an error for invalid setting names
 
         # Special handling for list of roles
-        if setting == "roles_to_prune" and isinstance(value, list):
+        if isinstance(value, list):
             # Convert list of ints to a comma-separated string for storage
             value = ",".join(map(str, value)) if value else None
 

@@ -8,6 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from modules.clean_string import sanitize_chat
 from modules.dtypes import AnalysisStatus, MessageId, is_guild_message
 from modules.security_utils import check_bot_hierarchy, check_verifiable_role
 
@@ -112,7 +113,7 @@ class ReactionRoles(commands.Cog):
             return []
 
         # 3. Line-by-Line Analysis
-        for line in message.content.splitlines():
+        for line in sanitize_chat(message.content).splitlines():
             clean_line = line.strip()
             if not clean_line:
                 continue
@@ -452,7 +453,7 @@ class ReactionRoles(commands.Cog):
         guild, member, message = context
 
         # 4. Quick check: Is the emoji even in the message?
-        if emoji_str not in message.content:
+        if emoji_str not in sanitize_chat(message.content):
             return
 
         # 5. Get (or compute) message analysis
