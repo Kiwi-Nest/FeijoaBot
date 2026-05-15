@@ -59,6 +59,9 @@ class GuildConfig:
     qotd_source_bot_id: UserId | None = None
     qotd_target_channel_id: ChannelId | None = None
     default_language: str = "en"  # Default to English
+    # Voice chat
+    vc_rgb_role_id: RoleId | None = None
+    vc_activity_channel_id: ChannelId | None = None
 
     @classmethod
     def from_row(cls, row: tuple) -> Self:
@@ -166,6 +169,8 @@ class ConfigDB:
                 "ALTER TABLE guild_configs ADD COLUMN inactive_role_id INTEGER",
                 "ALTER TABLE guild_configs ADD COLUMN inactive_role_threshold_days INTEGER NOT NULL DEFAULT 50",
                 "ALTER TABLE guild_configs ADD COLUMN event_ping_roles TEXT",
+                "ALTER TABLE guild_configs ADD COLUMN vc_rgb_role_id INTEGER",
+                "ALTER TABLE guild_configs ADD COLUMN vc_activity_channel_id INTEGER",
             ]:
                 try:
                     await conn.execute(col_sql)

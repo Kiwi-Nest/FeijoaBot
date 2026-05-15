@@ -13,11 +13,13 @@ from modules.ConfigDB import ConfigDB
 from modules.CurrencyLedgerDB import CurrencyLedgerDB
 from modules.Database import Database
 from modules.InvitesDB import InvitesDB
+from modules.PrivacyDB import PrivacyDB
 from modules.ReminderDB import ReminderDB
 from modules.server_admin import ServerManager
 from modules.TaskDB import TaskDB
 from modules.trading_logic import TradingLogic
 from modules.UserDB import UserDB
+from modules.VoiceChatDB import VoiceChatDB
 
 if TYPE_CHECKING:
     from cogs.help import Help
@@ -60,6 +62,8 @@ class BotCore(commands.Bot):
         self.ledger_db = CurrencyLedgerDB(self.database)
         self.config_db = ConfigDB(self.database)
         self.reminder_db = ReminderDB(self.database)
+        self.voicechat_db = VoiceChatDB(self.database)
+        self.privacy_db = PrivacyDB(self.database, self.voicechat_db)
 
         # AWAIT the post-initialization tasks to ensure tables are created
         # UserDB must be first as other tables have foreign keys to it.
@@ -69,6 +73,7 @@ class BotCore(commands.Bot):
         await self.ledger_db.post_init()
         await self.config_db.post_init()
         await self.reminder_db.post_init()
+        await self.voicechat_db.post_init()
 
         # Initialize TradingLogic if API key is present
         if self.config.twelvedata_api_key:

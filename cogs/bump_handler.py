@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 # Constants
 BUMP_REMINDER_DELAY = datetime.timedelta(hours=2)
 BACKUP_REMINDER_DELAY = datetime.timedelta(minutes=10)
+DISBOARD_COOLDOWN = datetime.timedelta(minutes=30)
 
 
 class BumpHandlerCog(commands.Cog):
@@ -43,6 +44,7 @@ class BumpHandlerCog(commands.Cog):
         self.ledger_db = ledger_db
         self.reminder_tasks: dict[GuildId, asyncio.Task | None] = {}
         self.disboard_bot_id = disboard_bot_id
+        self.recent_bumpers: dict[UserId, datetime.datetime] = {}
 
     @commands.Cog.listener()
     async def on_ready(self) -> None:
@@ -108,6 +110,7 @@ class BumpHandlerCog(commands.Cog):
             if is_new_bump:
                 reward = PositiveInt(random.randint(30, 50))
                 user_id = UserId(bumper.id)
+                self.recent_bumpers[user_id] = discord.utils.utcnow()
                 # Reward Currency
                 await self.user_db.mint_currency(
                     user_id,
@@ -212,6 +215,10 @@ class BumpHandlerCog(commands.Cog):
         is_backup: bool = False,
     ) -> None:
         """Construct and send the bump reminder message."""
+        now = discord.utils.utcnow()
+        self.recent_bumpers = {k: v for k, v in self.recent_bumpers.items() if (now - v) < DISBOARD_COOLDOWN}
+        on_cooldown = frozenset(self.recent_bumpers)
+
         log.info(
             "Sending %s bump reminder to #%s.",
             "backup" if is_backup else "primary",
@@ -230,7 +237,7 @@ class BumpHandlerCog(commands.Cog):
             description = f"{prefix} Use `/bump`.\n*Thanks to {last_bumper_mention} for the last one!*"
             reminder_embed = discord.Embed(title=title, description=description, color=color)
             role_to_ping = await channel.guild.fetch_role(role_id)
-            ping_text = await ping_online_role(role_to_ping, self.user_db) if role_to_ping else ""
+            ping_text = await ping_online_role(role_to_ping, self.user_db, exclude_ids=on_cooldown) if role_to_ping else ""
 
             await channel.send(content=ping_text, embed=reminder_embed)
         except InvalidRoleError:

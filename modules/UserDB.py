@@ -889,3 +889,33 @@ class UserDB:
             result = await cursor.fetchone()
             # result[0] is 1 or 0
             return bool(result[0]) if result else False
+
+    async def purge_inactive(self, days: int = 730) -> int:
+        """Delete zero-stat users inactive for N days.
+
+        Deletion order is critical due to FK: positions (child) before users (parent).
+        """
+        param = (f"-{days} days",)
+        criteria = """
+            last_active_timestamp < datetime('now', ?)
+            AND currency = 0 AND xp = 0 AND bumps = 0
+        """
+        async with self.database.get_conn() as conn:
+            await conn.execute(
+                f"""
+                DELETE FROM positions WHERE (user_id, guild_id) IN (
+                    SELECT discord_id, guild_id FROM {self.USERS_TABLE}
+                    WHERE {criteria}
+                )
+                """,  # noqa: S608
+                param,
+            )
+            cursor = await conn.execute(
+                f"DELETE FROM {self.USERS_TABLE} WHERE {criteria}",  # noqa: S608
+                param,
+            )
+            await conn.commit()
+
+        deleted = cursor.rowcount
+        self.log.info("Purged %d inactive users with zero stats (inactive for %d days)", deleted, days)
+        return deleted

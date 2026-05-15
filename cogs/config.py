@@ -6,6 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, GuildInteraction, RoleId, UserId
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.security_utils import (
     SecurityCheckError,
     check_role_safety,
@@ -20,9 +21,36 @@ if TYPE_CHECKING:
     from modules.BotCore import BotCore
     from modules.ConfigDB import ConfigDB
 
-_ROLE_LIST_PER_PAGE: Final[int] = 20  # rows 0 to 3; row 4 reserved for ◀/▶ nav
+_ROLE_LIST_PER_PAGE: Final[int] = 20  # max 25 per Discord select limit; row 0=select, row 1=confirm/cancel, row 2=nav
 _AUTODISCOVER_EXCLUDED: Final[frozenset[str]] = frozenset(
-    {"warn", "boy", "girl", "non-binary", "muted", "bot", "red", "orange", "yellow", "green", "blue", "purple", "black"},
+    {
+        "warn",
+        "boy",
+        "girl",
+        "non-binary",
+        "muted",
+        "bot",
+        "red",
+        "orange",
+        "yellow",
+        "green",
+        "blue",
+        "purple",
+        "black",
+        "white",
+        "gold",
+        "plum",
+        "pink",
+        "cornflower",
+        "announcements",
+        "automute",
+        "potential bot",
+        "ban appeal",
+        "he/him",
+        "she/her",
+        "they/them",
+        "pronouns",
+    },
 )
 
 log = logging.getLogger(__name__)
@@ -48,32 +76,12 @@ RoleSetting = Literal[
 ]
 
 
-class RoleListButton(discord.ui.Button):
-    def __init__(self, role: discord.Role, style: discord.ButtonStyle) -> None:
-        super().__init__(label=role.name, style=style)
-        self.role = role
+class RoleSelectView(discord.ui.View):
+    """Paginated select-based view for staged multi-role add/remove.
 
-    async def callback(self, interaction: discord.Interaction) -> None:
-        view: RoleListView = self.view  # type: ignore[assignment]
-        guild_id = GuildId(interaction.guild_id)
-        config = await view.config_db.get_guild_config(guild_id)
-        current: list[RoleId] = list(getattr(config, view.setting) or [])
-        role_id = RoleId(self.role.id)
-
-        if view.action == "add" and role_id not in current:
-            current.append(role_id)
-            self.style = discord.ButtonStyle.success
-        elif view.action == "remove" and role_id in current:
-            current.remove(role_id)
-            self.style = discord.ButtonStyle.secondary
-
-        self.disabled = True
-        await view.config_db.set_setting(guild_id, view.setting, current)
-        await interaction.response.edit_message(view=view)
-
-
-class RoleListView(discord.ui.View):
-    """Paginated view of role buttons for add/remove list management."""
+    Roles are staged locally and committed in a single DB write on Confirm,
+    following the same pattern as AutodiscoverView.
+    """
 
     def __init__(
         self,
@@ -86,9 +94,11 @@ class RoleListView(discord.ui.View):
         *,
         action: Literal["add", "remove"],
     ) -> None:
-        super().__init__(timeout=180)
+        super().__init__(timeout=600)
         self.all_roles = all_roles
         self.page = 0
+        self._staged: set[int] = set()
+        self.message: discord.Message | None = None
         self.label = label
         self.config_db = config_db
         self.guild_id = guild_id
@@ -105,31 +115,69 @@ class RoleListView(discord.ui.View):
     def page_header(self) -> str:
         verb = "add to" if self.action == "add" else "remove from"
         page_info = f" - Page {self.page + 1}/{self.total_pages}" if self.total_pages > 1 else ""
-        return f"Click a role to {verb} the {self.label} list{page_info}:"
+        suffix = f" - {len(self._staged)} staged" if self._staged else ""
+        return f"Select roles to {verb} the {self.label} list{page_info}{suffix}:"
 
     def _rebuild(self) -> None:
         self.clear_items()
         start = self.page * _ROLE_LIST_PER_PAGE
-        btn_style = discord.ButtonStyle.secondary if self.action == "add" else discord.ButtonStyle.danger
-        for role in self.all_roles[start : start + _ROLE_LIST_PER_PAGE]:
-            self.add_item(RoleListButton(role, btn_style))
+        end = start + _ROLE_LIST_PER_PAGE
+        page_roles = self.all_roles[start:end]
+
+        options = [
+            discord.SelectOption(label=role.name, value=str(role.id), default=role.id in self._staged) for role in page_roles
+        ]
+        select = discord.ui.Select(
+            placeholder="Select roles...",
+            min_values=0,
+            max_values=len(options),
+            options=options,
+            row=0,
+        )
+        select.callback = self._make_select_callback(select, start, end)
+        self.add_item(select)
+
+        confirm_label = f"Confirm ({len(self._staged)} selected)" if self._staged else "Confirm"
+        confirm_btn = discord.ui.Button(label=confirm_label, style=discord.ButtonStyle.success, row=1)
+        confirm_btn.callback = self._confirm_callback
+        self.add_item(confirm_btn)
+
+        cancel_btn = discord.ui.Button(label="Cancel", style=discord.ButtonStyle.secondary, row=1)
+        cancel_btn.callback = self._cancel_callback
+        self.add_item(cancel_btn)
+
         if self.total_pages > 1:
             prev_btn = discord.ui.Button(
                 label="◀",
                 style=discord.ButtonStyle.secondary,
                 disabled=self.page == 0,
-                row=4,
+                row=2,
             )
             next_btn = discord.ui.Button(
                 label="▶",
                 style=discord.ButtonStyle.secondary,
                 disabled=self.page >= self.total_pages - 1,
-                row=4,
+                row=2,
             )
             prev_btn.callback = self._make_page_callback(-1)
             next_btn.callback = self._make_page_callback(1)
             self.add_item(prev_btn)
             self.add_item(next_btn)
+
+    def _make_select_callback(
+        self,
+        select: discord.ui.Select,
+        page_start: int,
+        page_end: int,
+    ) -> Callable[[discord.Interaction], Coroutine[Any, Any, None]]:
+        async def callback(interaction: discord.Interaction) -> None:
+            page_role_ids = {r.id for r in self.all_roles[page_start:page_end]}
+            self._staged -= page_role_ids
+            self._staged |= {int(v) for v in select.values}
+            self._rebuild()
+            await interaction.response.edit_message(content=self.page_header, view=self)
+
+        return callback
 
     def _make_page_callback(self, delta: int) -> Callable[[discord.Interaction], Coroutine[Any, Any, None]]:
         async def callback(interaction: discord.Interaction) -> None:
@@ -138,6 +186,48 @@ class RoleListView(discord.ui.View):
             await interaction.response.edit_message(content=self.page_header, view=self)
 
         return callback
+
+    async def _confirm_callback(self, interaction: discord.Interaction) -> None:
+        if not self._staged:
+            await interaction.response.send_message("No roles selected.", ephemeral=True)
+            return
+        config = await self.config_db.get_guild_config(self.guild_id)
+        current: list[RoleId] = list(getattr(config, self.setting) or [])
+        if self.action == "add":
+            for role_id in self._staged:
+                r = RoleId(role_id)
+                if r not in current:
+                    current.append(r)
+        else:
+            for role_id in self._staged:
+                r = RoleId(role_id)
+                if r in current:
+                    current.remove(r)
+        await self.config_db.set_setting(self.guild_id, self.setting, current)
+        for item in self.children:
+            item.disabled = True
+        verb = "added to" if self.action == "add" else "removed from"
+        mentions = " ".join(f"<@&{r}>" for r in self._staged)
+        await interaction.response.edit_message(
+            content=f"✅ {mentions} {verb} the {self.label} list.",
+            view=self,
+        )
+        self.stop()
+
+    async def _cancel_callback(self, interaction: discord.Interaction) -> None:
+        for item in self.children:
+            item.disabled = True
+        await interaction.response.edit_message(content="❌ No changes made.", view=self)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
+        if self.message:
+            await self.message.edit(
+                content="⏱️ This menu expired. Run the command again to continue.",
+                view=self,
+            )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
@@ -283,6 +373,7 @@ def get_suggestions(guild: discord.Guild) -> dict[str, int | None]:  # noqa: PLR
 @app_commands.default_permissions(manage_guild=True)
 @commands.guild_only()
 class Config(
+    GuildOnlyHybridCog,
     commands.GroupCog,
     name="config",
     description="Manage server-specific bot settings.",
@@ -335,8 +426,9 @@ class Config(
                 if not roles:
                     await interaction.response.send_message(f"No roles in the {label} list to remove.", ephemeral=True)
                     return
-            view = RoleListView(roles, self.config_db, guild_id, setting, UserId(interaction.user.id), label, action=action)
+            view = RoleSelectView(roles, self.config_db, guild_id, setting, UserId(interaction.user.id), label, action=action)
             await interaction.response.send_message(view.page_header, view=view, ephemeral=True)
+            view.message = await interaction.original_response()
             return
 
         # Role provided - immediate add/remove
@@ -420,6 +512,7 @@ class Config(
             "Bot Warning Log": config.bot_warning_channel_id,
             "Member Count Channel": config.member_count_channel_id,
             "Tag Role Count Channel": config.tag_role_channel_id,
+            "VC Activity Channel": config.vc_activity_channel_id,
         }
         forwarding = {
             "Forwarding Source Bot": (f"<@{config.qotd_source_bot_id}>" if config.qotd_source_bot_id else "*Not Set*"),
@@ -436,6 +529,7 @@ class Config(
             "Automute Role": config.automute_role_id,
             "XP Opt-Out Role": config.xp_opt_out_role_id,
             "Inactive Role": config.inactive_role_id,
+            "VC RGB Role": config.vc_rgb_role_id,
         }
         other = {
             "Inactive Member Prune Days": f"{config.inactivity_days} days",
@@ -512,6 +606,7 @@ class Config(
                 value="tag_role_channel_id",
             ),
             app_commands.Choice(name="Bot Warning Log", value="bot_warning_channel_id"),
+            app_commands.Choice(name="VC Activity Channel", value="vc_activity_channel_id"),
         ],
     )
     async def set_channel(
@@ -560,6 +655,7 @@ class Config(
             app_commands.Choice(name="Automute Role", value="automute_role_id"),
             app_commands.Choice(name="XP Opt-Out Role", value="xp_opt_out_role_id"),
             app_commands.Choice(name="Inactive Role", value="inactive_role_id"),
+            app_commands.Choice(name="VC RGB Role", value="vc_rgb_role_id"),
         ],
     )
     async def set_role(

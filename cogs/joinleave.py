@@ -236,6 +236,8 @@ class JoinLeaveLogCog(commands.Cog):
         # Bots do not get auto-verified by this system, but we log them immediately.
         if member.bot:
             await self._handle_join_logging(member, inviter_id=None, verified_role=None)
+        elif "megaseller" in member.name:
+            await member.ban(reason="Spam account.")
 
     @commands.Cog.listener()
     async def on_invite_recorded(

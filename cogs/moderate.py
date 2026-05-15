@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from modules.dtypes import GuildId, GuildInteraction
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.security_utils import (
     SecurityCheckError,
     ensure_bot_hierarchy,
@@ -69,6 +70,7 @@ class DurationTransformer(app_commands.Transformer):
 # Add a cog-wide cooldown: 5 actions per 60 seconds, per user, per guild.
 @app_commands.checks.cooldown(5, 60.0, key=lambda i: (i.guild_id, i.user.id))
 class Moderate(
+    GuildOnlyHybridCog,
     commands.GroupCog,
     group_name="moderate",
     group_description="Moderation commands for server management.",

@@ -16,7 +16,8 @@ class Database:
     async def _configure_connection(self, conn: aiosqlite.Connection) -> None:
         """Apply essential PRAGMA settings for integrity and performance."""
         await conn.execute("PRAGMA foreign_keys = ON;")
-        await conn.execute("PRAGMA busy_timeout = 5000;")  # Wait 5s if locked
+        await conn.execute("PRAGMA busy_timeout = 5000;")
+        await conn.execute("PRAGMA journal_mode=WAL;")
 
     @asynccontextmanager
     async def get_cursor(self) -> AsyncGenerator[aiosqlite.Cursor]:

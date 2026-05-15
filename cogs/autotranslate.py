@@ -9,7 +9,7 @@ import contextlib
 import logging
 import re
 from collections import OrderedDict
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 import discord
 from discord import app_commands
@@ -18,6 +18,8 @@ from discord.ext import commands
 from modules.clean_string import sanitize_chat
 from modules.dtypes import GuildId, UserId
 from modules.translation import TranslationClient
+
+SECOND_COOLDOWN: Final[int] = 1
 
 if TYPE_CHECKING:
     import aiohttp
@@ -68,6 +70,7 @@ class TranslateSelectView(discord.ui.View):
         await self.cog._perform_reactive_translation(interaction, self.original_message, target_lang="ro", show_hint=True)
 
 
+@app_commands.checks.cooldown(2, SECOND_COOLDOWN * 10, key=lambda i: (i.guild_id, i.user.id))
 class AutoTranslate(commands.Cog):
     """Cog for handling automatic and reaction-based translations."""
 

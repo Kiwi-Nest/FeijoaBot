@@ -1,5 +1,20 @@
 import logging
 
+# Linux sandbox before continuing
+try:
+    from landlock import Ruleset
+except ImportError:
+    logging.warning("Skipping sandboxing.")
+else:
+    rs = Ruleset()
+    rs.allow(".")
+    rs.allow("/usr/lib64")
+    rs.allow("/etc")  # resolve domains
+    rs.allow("/usr/share/zoneinfo/")
+    rs.allow("/proc/self")
+    rs.apply()
+    logging.info("Succeeded sandboxing.")
+
 import discord
 from dotenv import load_dotenv
 

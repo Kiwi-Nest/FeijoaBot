@@ -22,5 +22,10 @@ class SelfTransfer:
     pass
 
 
+@dataclass(slots=True, frozen=True)
+class SearchError:
+    reason: str
+
+
 type BurnError = InsufficientFunds
 type TransferError = InsufficientFunds | SelfTransfer

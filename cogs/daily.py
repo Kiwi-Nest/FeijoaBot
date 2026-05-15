@@ -9,7 +9,7 @@ import datetime
 import logging
 import random
 import time
-from typing import TYPE_CHECKING, override
+from typing import TYPE_CHECKING, Final, override
 from zoneinfo import ZoneInfo
 
 import discord
@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 
 # Constants for magic values
 JACKPOT_THRESHOLD = 1000
+SECOND_COOLDOWN: Final[int] = 1
 
 
 class DailyView(discord.ui.View):
@@ -263,6 +264,7 @@ class Daily(GuildOnlyHybridCog):
         return failed
 
     @commands.hybrid_command(name="daily", description="Claim your daily currency.")
+    @commands.cooldown(2, SECOND_COOLDOWN * 10, commands.BucketType.user)
     async def daily(self, ctx: commands.Context) -> None:
         # Atomically attempt to claim the daily. If it fails, they've already claimed.
         if not await self.user_db.attempt_daily_claim(UserId(ctx.author.id), GuildId(ctx.guild.id)):

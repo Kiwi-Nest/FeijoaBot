@@ -103,10 +103,10 @@ class InvitesDB:
             INSERT INTO invites (invitee_id, guild_id, inviter_id, joined_at)
             VALUES (?, ?, ?, ?)
             ON CONFLICT(invitee_id, guild_id) DO UPDATE SET
-                inviter_id = excluded.inviter_id,
+                inviter_id = COALESCE(excluded.inviter_id, invites.inviter_id),
                 joined_at = COALESCE(excluded.joined_at, invites.joined_at)
             WHERE
-                invites.inviter_id IS NOT excluded.inviter_id OR
+                (excluded.inviter_id IS NOT NULL AND invites.inviter_id IS NOT excluded.inviter_id) OR
                 (excluded.joined_at IS NOT NULL AND invites.joined_at IS NOT excluded.joined_at);
         """
         async with self.database.get_conn() as conn:

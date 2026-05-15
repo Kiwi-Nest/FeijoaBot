@@ -2,10 +2,10 @@ from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
-from discord.ext import commands
 
 from modules.dtypes import GuildId, NonNegativeInt, UserId
 from modules.enums import StatName
+from modules.guild_cog import GuildOnlyHybridCog
 
 if TYPE_CHECKING:
     from modules.BotCore import BotCore
@@ -72,7 +72,7 @@ class LeaderboardView(discord.ui.View):
         await interaction.response.edit_message(embed=await self.get_page_embed(), view=self)
 
 
-class Leaderboard(commands.Cog):
+class Leaderboard(GuildOnlyHybridCog):
     def __init__(self, bot: BotCore, user_db: UserDB) -> None:
         self.bot = bot
         self.user_db = user_db

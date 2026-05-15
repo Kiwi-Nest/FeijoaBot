@@ -8,6 +8,7 @@ from discord.ext import commands
 from modules.dtypes import GuildId, GuildInteraction, NonNegativeInt, PositiveInt, UserId
 from modules.errors import InsufficientFunds
 from modules.exceptions import UserError
+from modules.guild_cog import GuildOnlyHybridCog
 from modules.result import Err, Ok
 
 if TYPE_CHECKING:
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 @app_commands.default_permissions(manage_guild=True)
 @app_commands.checks.cooldown(5, 10.0, key=lambda i: (i.guild_id, i.user.id))
 class AdminEconomy(
+    GuildOnlyHybridCog,
     commands.GroupCog,
     group_name="economy",
     group_description="Admin economy management",

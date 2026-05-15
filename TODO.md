@@ -10,8 +10,4 @@ Profile command
 
 - Could replace /balance by adding other statistics
 
-Fix invite sync not properly persisting data. Bulk import does not recognize old data.
-
-# Low Priority
-
-- Message purge
+Migrate membercount into official cog

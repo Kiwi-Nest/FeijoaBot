@@ -123,6 +123,18 @@ class ReminderDB:
             )
             await conn.commit()
 
+    async def purge_stale(self, days: int = 90) -> int:
+        """Delete reminders older than N days."""
+        async with self.database.get_conn() as conn:
+            cursor = await conn.execute(
+                f"DELETE FROM {self.TABLE_NAME} WHERE remind_at < datetime('now', ?)",  # noqa: S608
+                (f"-{days} days",),
+            )
+            await conn.commit()
+        deleted = cursor.rowcount
+        log.info("Purged %d stale reminders (older than %d days)", deleted, days)
+        return deleted
+
     async def handle_failure(self, message_id: int, current_failures: int) -> None:
         """Increment failure count and backoff."""
         new_failures = current_failures + 1
